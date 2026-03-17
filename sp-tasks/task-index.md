@@ -6,7 +6,7 @@
 |-------|------|-------|------|-------------|---------|---------|
 | 0 | Project Setup | 7 | 7 | 0 | 0 | 0 |
 | 1 | Auth & Multi-Tenancy | 10 | 10 | 0 | 0 | 0 |
-| 2 | Client Management | 8 | 0 | 0 | 8 | 0 |
+| 2 | Client Management | 8 | 8 | 0 | 0 | 0 |
 | 3 | Social Account Connections | 9 | 0 | 0 | 9 | 0 |
 | 4 | Media Upload & Storage | 5 | 0 | 0 | 5 | 0 |
 | 5 | Post Creation & Scheduling | 10 | 0 | 0 | 10 | 0 |
@@ -15,9 +15,9 @@
 | 8 | Billing & Subscriptions | 8 | 0 | 0 | 8 | 0 |
 | 9 | Notifications & Real-time | 7 | 0 | 0 | 7 | 0 |
 | 10 | Polish, Testing & Deploy | 8 | 0 | 0 | 8 | 0 |
-| **Total** | | **87** | **17** | **0** | **70** | **0** |
+| **Total** | | **87** | **25** | **0** | **62** | **0** |
 
-**Progress**: 17/87 (20%)
+**Progress**: 25/87 (29%)
 
 ---
 
@@ -52,14 +52,14 @@
 
 | ID | Task | Agent | Complexity | Status | Dependencies |
 |----|------|-------|-----------|--------|-------------|
-| TASK-018 | Prisma schema: Client, ClientGroup, ClientGroupMembership | db | S | PENDING | TASK-008 |
-| TASK-019 | Client module: CRUD service + controller | backend | M | PENDING | TASK-018, TASK-011 |
-| TASK-020 | ClientGroup module: CRUD + membership management | backend | M | PENDING | TASK-018, TASK-011 |
-| TASK-021 | Bulk operations service (add/edit/delete multiple clients) | backend | M | PENDING | TASK-019 |
-| TASK-022 | Client list page with search, filter, pagination | frontend | M | PENDING | TASK-015, TASK-019 |
-| TASK-023 | Client detail page | frontend | S | PENDING | TASK-022 |
-| TASK-024 | Client groups page + drag-and-drop assignment | frontend | M | PENDING | TASK-022, TASK-020 |
-| TASK-025 | Bulk operations UI (select, batch actions toolbar) | frontend | M | PENDING | TASK-022, TASK-021 |
+| TASK-018 | Prisma schema: Client, ClientGroup, ClientGroupMembership | db | S | COMPLETED | TASK-008 |
+| TASK-019 | Client module: CRUD service + controller | backend | M | COMPLETED | TASK-018, TASK-011 |
+| TASK-020 | ClientGroup module: CRUD + membership management | backend | M | COMPLETED | TASK-018, TASK-011 |
+| TASK-021 | Bulk operations service (add/edit/delete multiple clients) | backend | M | COMPLETED | TASK-019 |
+| TASK-022 | Client list page with search, filter, pagination | frontend | M | COMPLETED | TASK-015, TASK-019 |
+| TASK-023 | Client detail page | frontend | S | COMPLETED | TASK-022 |
+| TASK-024 | Client groups page + drag-and-drop assignment | frontend | M | COMPLETED | TASK-022, TASK-020 |
+| TASK-025 | Bulk operations UI (select, batch actions toolbar) | frontend | M | COMPLETED | TASK-022, TASK-021 |
 
 ## Phase 3: Social Account Connections
 
