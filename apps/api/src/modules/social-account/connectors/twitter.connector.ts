@@ -1,0 +1,245 @@
+import {
+  Injectable,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { randomBytes, createHash } from "node:crypto";
+import type {
+  OAuthConnector,
+  OAuthTokens,
+  SocialProfile,
+} from "../interfaces/oauth-connector.interface";
+
+/**
+ * Twitter (X) OAuth 2.0 connector using PKCE (Proof Key for Code Exchange).
+ *
+ * Required environment variables:
+ *   TWITTER_CLIENT_ID
+ *   TWITTER_CLIENT_SECRET
+ */
+@Injectable()
+export class TwitterConnector implements OAuthConnector {
+  private readonly authUrl = "https://twitter.com/i/oauth2/authorize";
+  private readonly tokenUrl = "https://api.twitter.com/2/oauth2/token";
+  private readonly profileUrl = "https://api.twitter.com/2/users/me";
+  private readonly revokeUrl = "https://api.twitter.com/2/oauth2/revoke";
+  private readonly scopes = [
+    "tweet.read",
+    "tweet.write",
+    "users.read",
+    "offline.access",
+  ];
+
+  private get clientId(): string {
+    const id = process.env["TWITTER_CLIENT_ID"];
+    if (!id) throw new InternalServerErrorException("TWITTER_CLIENT_ID is not set");
+    return id;
+  }
+
+  private get clientSecret(): string {
+    const secret = process.env["TWITTER_CLIENT_SECRET"];
+    if (!secret) throw new InternalServerErrorException("TWITTER_CLIENT_SECRET is not set");
+    return secret;
+  }
+
+  /**
+   * Generates a PKCE code verifier (random 43-128 char string).
+   * The verifier is embedded in the state so it can be retrieved during callback.
+   */
+  private generateCodeVerifier(): string {
+    return randomBytes(32).toString("base64url");
+  }
+
+  /**
+   * Derives the S256 code challenge from the verifier.
+   */
+  private generateCodeChallenge(verifier: string): string {
+    return createHash("sha256").update(verifier).digest("base64url");
+  }
+
+  /**
+   * Returns the OAuth authorization URL. The state string is expected to
+   * contain the PKCE verifier as `<agencyId>:<codeVerifier>` (callers must
+   * split on first colon to separate them).
+   */
+  getAuthUrl(state: string, redirectUri: string): string {
+    const codeVerifier = this.generateCodeVerifier();
+    const codeChallenge = this.generateCodeChallenge(codeVerifier);
+
+    // Append the verifier to the state so callback can reconstruct it
+    const stateWithVerifier = `${state}:${codeVerifier}`;
+
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: this.clientId,
+      redirect_uri: redirectUri,
+      scope: this.scopes.join(" "),
+      state: stateWithVerifier,
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+    });
+
+    return `${this.authUrl}?${params.toString()}`;
+  }
+
+  /**
+   * Exchanges the authorization code and PKCE verifier for tokens.
+   * The `code` parameter must be the raw code; the `redirectUri` carries
+   * the verifier via the `codeVerifier` query param convention. Because
+   * the interface does not expose a separate verifier argument, callers
+   * should pass `code` as `<code>:<codeVerifier>` (colon-separated).
+   */
+  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+    // Convention: code is passed as "<authCode>:<codeVerifier>"
+    const separatorIndex = code.indexOf(":");
+    const authCode = separatorIndex >= 0 ? code.slice(0, separatorIndex) : code;
+    const codeVerifier = separatorIndex >= 0 ? code.slice(separatorIndex + 1) : "";
+
+    const credentials = Buffer.from(
+      `${this.clientId}:${this.clientSecret}`
+    ).toString("base64");
+
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: authCode,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
+    });
+
+    const response = await fetch(this.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: body.toString(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new UnauthorizedException(
+        `Twitter token exchange failed: ${errorText}`
+      );
+    }
+
+    const data = (await response.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
+
+    return this.mapTokenResponse(data);
+  }
+
+  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
+    const credentials = Buffer.from(
+      `${this.clientId}:${this.clientSecret}`
+    ).toString("base64");
+
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshTokenValue,
+    });
+
+    const response = await fetch(this.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: body.toString(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new UnauthorizedException(
+        `Twitter token refresh failed: ${errorText}`
+      );
+    }
+
+    const data = (await response.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
+
+    return this.mapTokenResponse(data);
+  }
+
+  async revokeToken(accessToken: string): Promise<void> {
+    const credentials = Buffer.from(
+      `${this.clientId}:${this.clientSecret}`
+    ).toString("base64");
+
+    const body = new URLSearchParams({
+      token: accessToken,
+      token_type_hint: "access_token",
+    });
+
+    await fetch(this.revokeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: body.toString(),
+    });
+    // Best-effort revocation — do not throw on non-2xx
+  }
+
+  async getUserProfile(accessToken: string): Promise<SocialProfile> {
+    const params = new URLSearchParams({
+      "user.fields": "id,name,username,profile_image_url",
+    });
+
+    const response = await fetch(`${this.profileUrl}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new UnauthorizedException(
+        `Twitter profile fetch failed: ${errorText}`
+      );
+    }
+
+    const json = (await response.json()) as {
+      data: {
+        id: string;
+        name: string;
+        username: string;
+        profile_image_url?: string;
+      };
+    };
+
+    return {
+      platformUserId: json.data.id,
+      username: json.data.username,
+      displayName: json.data.name,
+      avatarUrl: json.data.profile_image_url,
+    };
+  }
+
+  private mapTokenResponse(data: {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  }): OAuthTokens {
+    const expiresAt =
+      data.expires_in != null
+        ? new Date(Date.now() + data.expires_in * 1000)
+        : undefined;
+
+    const scopes = data.scope ? data.scope.split(" ") : undefined;
+
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt,
+      scopes,
+    };
+  }
+}

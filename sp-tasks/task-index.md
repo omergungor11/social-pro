@@ -7,7 +7,7 @@
 | 0 | Project Setup | 7 | 7 | 0 | 0 | 0 |
 | 1 | Auth & Multi-Tenancy | 10 | 10 | 0 | 0 | 0 |
 | 2 | Client Management | 8 | 8 | 0 | 0 | 0 |
-| 3 | Social Account Connections | 9 | 0 | 0 | 9 | 0 |
+| 3 | Social Account Connections | 9 | 9 | 0 | 0 | 0 |
 | 4 | Media Upload & Storage | 5 | 0 | 0 | 5 | 0 |
 | 5 | Post Creation & Scheduling | 10 | 0 | 0 | 10 | 0 |
 | 6 | AI Content Generation | 7 | 0 | 0 | 7 | 0 |
@@ -15,9 +15,9 @@
 | 8 | Billing & Subscriptions | 8 | 0 | 0 | 8 | 0 |
 | 9 | Notifications & Real-time | 7 | 0 | 0 | 7 | 0 |
 | 10 | Polish, Testing & Deploy | 8 | 0 | 0 | 8 | 0 |
-| **Total** | | **87** | **25** | **0** | **62** | **0** |
+| **Total** | | **87** | **34** | **0** | **53** | **0** |
 
-**Progress**: 25/87 (29%)
+**Progress**: 34/87 (39%)
 
 ---
 
@@ -65,15 +65,15 @@
 
 | ID | Task | Agent | Complexity | Status | Dependencies |
 |----|------|-------|-----------|--------|-------------|
-| TASK-026 | Prisma schema: SocialAccount + encrypted token fields | db | S | PENDING | TASK-008 |
-| TASK-027 | OAuth connector base service + platform registry | backend | L | PENDING | TASK-026, TASK-011 |
-| TASK-028 | Twitter/X OAuth2 connector | backend | M | PENDING | TASK-027 |
-| TASK-029 | Facebook + Instagram OAuth connector (Meta Graph API) | backend | M | PENDING | TASK-027 |
-| TASK-030 | LinkedIn OAuth connector | backend | M | PENDING | TASK-027 |
-| TASK-031 | TikTok OAuth connector | backend | M | PENDING | TASK-027 |
-| TASK-032 | YouTube OAuth connector (Google OAuth) | backend | M | PENDING | TASK-027 |
-| TASK-033 | Token refresh background job (BullMQ repeatable) | backend | M | PENDING | TASK-027 |
-| TASK-034 | Social accounts page: connect/disconnect UI, connection health | frontend | M | PENDING | TASK-015, TASK-027 |
+| TASK-026 | Prisma schema: SocialAccount + encrypted token fields | db | S | COMPLETED | TASK-008 |
+| TASK-027 | OAuth connector base service + platform registry | backend | L | COMPLETED | TASK-026, TASK-011 |
+| TASK-028 | Twitter/X OAuth2 connector | backend | M | COMPLETED | TASK-027 |
+| TASK-029 | Facebook + Instagram OAuth connector (Meta Graph API) | backend | M | COMPLETED | TASK-027 |
+| TASK-030 | LinkedIn OAuth connector | backend | M | COMPLETED | TASK-027 |
+| TASK-031 | TikTok OAuth connector | backend | M | COMPLETED | TASK-027 |
+| TASK-032 | YouTube OAuth connector (Google OAuth) | backend | M | COMPLETED | TASK-027 |
+| TASK-033 | Token refresh background job (BullMQ repeatable) | backend | M | COMPLETED | TASK-027 |
+| TASK-034 | Social accounts page: connect/disconnect UI, connection health | frontend | M | COMPLETED | TASK-015, TASK-027 |
 
 ## Phase 4: Media Upload & Storage
 
