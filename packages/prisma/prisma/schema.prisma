@@ -1,0 +1,549 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// === Enums ===
+
+enum UserRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum SocialPlatform {
+  TWITTER
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  TIKTOK
+  YOUTUBE
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+enum PostTargetStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  GIF
+  DOCUMENT
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PlanInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum AiModel {
+  CLAUDE
+  OPENAI
+}
+
+enum AiGenerationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum ReportType {
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum MetricType {
+  FOLLOWERS
+  ENGAGEMENT
+  IMPRESSIONS
+  REACH
+  CLICKS
+  LIKES
+  COMMENTS
+  SHARES
+  SAVES
+  VIEWS
+  WATCH_TIME
+}
+
+enum UsageMetric {
+  POSTS_PUBLISHED
+  AI_GENERATIONS
+  STORAGE_BYTES
+  SOCIAL_ACCOUNTS
+  CLIENTS
+  TEAM_MEMBERS
+}
+
+enum NotificationType {
+  POST_PUBLISHED
+  POST_FAILED
+  INVITATION
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  ACCOUNT_DISCONNECT
+  LIMIT_WARNING
+  REPORT_READY
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+// === Core: Agency & Users ===
+
+model Agency {
+  id                    String   @id @default(cuid())
+  name                  String
+  slug                  String   @unique
+  logoUrl               String?
+  settings              Json     @default("{}")
+  stripeCustomerId      String?  @unique
+  stripeSubscriptionId  String?
+  planId                String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  plan                  Plan?    @relation(fields: [planId], references: [id])
+  members               AgencyMember[]
+  invitations           Invitation[]
+  clients               Client[]
+  clientGroups          ClientGroup[]
+  socialAccounts        SocialAccount[]
+  posts                 Post[]
+  analyticsReports      AnalyticsReport[]
+  aiGenerations         AiGeneration[]
+  contentTemplates      ContentTemplate[]
+  billingEvents         BillingEvent[]
+  usageRecords          UsageRecord[]
+  notifications         Notification[]
+  notificationPrefs     NotificationPreference[]
+  auditLogs             AuditLog[]
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  passwordHash      String
+  name              String
+  avatarUrl         String?
+  emailVerifiedAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  memberships       AgencyMember[]
+  posts             Post[]       @relation("PostCreatedBy")
+  aiGenerations     AiGeneration[]
+  notifications     Notification[]
+  notificationPrefs NotificationPreference[]
+  auditLogs         AuditLog[]
+}
+
+model AgencyMember {
+  id         String    @id @default(cuid())
+  agencyId   String
+  userId     String
+  role       UserRole  @default(VIEWER)
+  invitedAt  DateTime?
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  agency     Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, userId])
+  @@index([agencyId])
+  @@index([userId])
+}
+
+model Invitation {
+  id         String    @id @default(cuid())
+  agencyId   String
+  email      String
+  role       UserRole  @default(EDITOR)
+  token      String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  agency     Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
+  @@index([email])
+}
+
+// === Client Management ===
+
+model Client {
+  id         String   @id @default(cuid())
+  agencyId   String
+  name       String
+  email      String?
+  phone      String?
+  company    String?
+  avatarUrl  String?
+  notes      String?
+  tags       String[] @default([])
+  metadata   Json     @default("{}")
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agency          Agency                  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  groupMemberships ClientGroupMembership[]
+  socialAccounts  SocialAccount[]
+  posts           Post[]
+  analyticsReports AnalyticsReport[]
+
+  @@index([agencyId, name])
+  @@index([agencyId, email])
+}
+
+model ClientGroup {
+  id          String   @id @default(cuid())
+  agencyId    String
+  name        String
+  color       String   @default("#6366f1")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agency      Agency                  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  memberships ClientGroupMembership[]
+
+  @@index([agencyId])
+}
+
+model ClientGroupMembership {
+  id        String   @id @default(cuid())
+  clientId  String
+  groupId   String
+  createdAt DateTime @default(now())
+
+  client    Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  group     ClientGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, groupId])
+}
+
+// === Social Accounts ===
+
+model SocialAccount {
+  id                String         @id @default(cuid())
+  agencyId          String
+  clientId          String?
+  platform          SocialPlatform
+  platformUserId    String
+  platformUsername  String?
+  displayName       String?
+  avatarUrl         String?
+  accessToken       String
+  refreshToken      String?
+  tokenExpiresAt    DateTime?
+  scopes            String[]       @default([])
+  metadata          Json           @default("{}")
+  isActive          Boolean        @default(true)
+  connectedAt       DateTime       @default(now())
+  lastSyncedAt      DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  agency            Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client            Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  postTargets       PostTarget[]
+  analyticsSnapshots AnalyticsSnapshot[]
+
+  @@unique([agencyId, platform, platformUserId])
+  @@index([agencyId])
+  @@index([agencyId, platform])
+}
+
+// === Posts ===
+
+model Post {
+  id              String     @id @default(cuid())
+  agencyId        String
+  createdByUserId String
+  clientId        String?
+  title           String?
+  content         Json       @default("{}")
+  status          PostStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  aiGenerated     Boolean    @default(false)
+  aiPrompt        String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  agency          Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  createdBy       User         @relation("PostCreatedBy", fields: [createdByUserId], references: [id])
+  client          Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  media           PostMedia[]
+  targets         PostTarget[]
+  approvals       PostApproval[]
+
+  @@index([agencyId, status])
+  @@index([agencyId, scheduledAt])
+  @@index([agencyId, clientId])
+}
+
+model PostMedia {
+  id           String    @id @default(cuid())
+  postId       String
+  mediaType    MediaType
+  url          String
+  thumbnailUrl String?
+  fileSize     Int?
+  mimeType     String?
+  altText      String?
+  storageKey   String?
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  post         Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+model PostTarget {
+  id                      String           @id @default(cuid())
+  postId                  String
+  socialAccountId         String
+  platformPostId          String?
+  platformUrl             String?
+  status                  PostTargetStatus @default(PENDING)
+  errorMessage            String?
+  platformSpecificContent Json?
+  publishedAt             DateTime?
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  post                    Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount           SocialAccount    @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  analyticsSnapshots      AnalyticsSnapshot[]
+
+  @@index([postId])
+  @@index([socialAccountId])
+}
+
+model PostApproval {
+  id          String         @id @default(cuid())
+  postId      String
+  requestedBy String
+  approvedBy  String?
+  status      ApprovalStatus @default(PENDING)
+  comment     String?
+  createdAt   DateTime       @default(now())
+
+  post        Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+// === AI ===
+
+model AiGeneration {
+  id         String             @id @default(cuid())
+  agencyId   String
+  userId     String
+  prompt     String
+  result     Json?
+  model      AiModel
+  tokensUsed Int                @default(0)
+  costCents  Int                @default(0)
+  status     AiGenerationStatus @default(PENDING)
+  createdAt  DateTime           @default(now())
+
+  agency     Agency             @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user       User               @relation(fields: [userId], references: [id])
+
+  @@index([agencyId, createdAt])
+}
+
+model ContentTemplate {
+  id        String   @id @default(cuid())
+  agencyId  String
+  name      String
+  platform  SocialPlatform?
+  template  Json
+  variables String[] @default([])
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
+}
+
+// === Analytics ===
+
+model AnalyticsSnapshot {
+  id              String         @id @default(cuid())
+  socialAccountId String
+  postTargetId    String?
+  metricType      MetricType
+  value           BigInt
+  periodStart     DateTime
+  periodEnd       DateTime
+  rawData         Json?
+  fetchedAt       DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+
+  socialAccount   SocialAccount  @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  postTarget      PostTarget?    @relation(fields: [postTargetId], references: [id], onDelete: SetNull)
+
+  @@index([socialAccountId, metricType, periodStart])
+}
+
+model AnalyticsReport {
+  id             String     @id @default(cuid())
+  agencyId       String
+  clientId       String?
+  title          String
+  dateRangeStart DateTime
+  dateRangeEnd   DateTime
+  reportType     ReportType
+  generatedData  Json?
+  pdfUrl         String?
+  createdAt      DateTime   @default(now())
+
+  agency         Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client         Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId, reportType])
+}
+
+// === Billing ===
+
+model Plan {
+  id                         String       @id @default(cuid())
+  name                       String
+  slug                       String       @unique
+  stripePriceId              String?
+  interval                   PlanInterval
+  maxSocialAccounts          Int          @default(3)
+  maxClients                 Int          @default(10)
+  maxTeamMembers             Int          @default(2)
+  maxScheduledPostsPerMonth  Int          @default(30)
+  aiCreditsPerMonth          Int          @default(50)
+  storageLimitGb             Int          @default(1)
+  features                   Json         @default("{}")
+  priceCents                 Int          @default(0)
+  isActive                   Boolean      @default(true)
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+
+  agencies                   Agency[]
+}
+
+model BillingEvent {
+  id            String   @id @default(cuid())
+  agencyId      String
+  stripeEventId String?  @unique
+  eventType     String
+  amountCents   Int      @default(0)
+  currency      String   @default("usd")
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now())
+
+  agency        Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
+}
+
+model UsageRecord {
+  id          String      @id @default(cuid())
+  agencyId    String
+  metric      UsageMetric
+  value       BigInt      @default(0)
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime    @default(now())
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, metric, periodStart])
+}
+
+// === Notifications ===
+
+model Notification {
+  id        String           @id @default(cuid())
+  agencyId  String
+  userId    String
+  type      NotificationType
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  agency    Agency           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([agencyId, createdAt])
+}
+
+model NotificationPreference {
+  id        String              @id @default(cuid())
+  userId    String
+  agencyId  String
+  channel   NotificationChannel
+  type      NotificationType
+  enabled   Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agency    Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, agencyId, channel, type])
+}
+
+// === Audit ===
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  agencyId   String
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  changes    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  agency     Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId, createdAt])
+  @@index([entityType, entityId])
+}

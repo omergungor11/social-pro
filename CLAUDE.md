@@ -21,7 +21,7 @@ Social Pro — ajanslar icin kapsamli sosyal medya yonetim ve musteri yonetim pa
 
 ## Mevcut Durum
 
-**Progress**: 0/87 task (%0) — Phase 0 basliyor.
+**Progress**: 7/87 task (%8) — Phase 0 tamamlandi, Phase 1 basliyor.
 
 > Her yeni session'da `sp-tasks/task-index.md` oku veya `/cold-start` calistir.
 

@@ -4,7 +4,7 @@
 
 | Phase | Name | Total | Done | In Progress | Pending | Blocked |
 |-------|------|-------|------|-------------|---------|---------|
-| 0 | Project Setup | 7 | 0 | 0 | 7 | 0 |
+| 0 | Project Setup | 7 | 7 | 0 | 0 | 0 |
 | 1 | Auth & Multi-Tenancy | 10 | 0 | 0 | 10 | 0 |
 | 2 | Client Management | 8 | 0 | 0 | 8 | 0 |
 | 3 | Social Account Connections | 9 | 0 | 0 | 9 | 0 |
@@ -15,9 +15,9 @@
 | 8 | Billing & Subscriptions | 8 | 0 | 0 | 8 | 0 |
 | 9 | Notifications & Real-time | 7 | 0 | 0 | 7 | 0 |
 | 10 | Polish, Testing & Deploy | 8 | 0 | 0 | 8 | 0 |
-| **Total** | | **87** | **0** | **0** | **87** | **0** |
+| **Total** | | **87** | **7** | **0** | **80** | **0** |
 
-**Progress**: 0/87 (0%)
+**Progress**: 7/87 (8%)
 
 ---
 
@@ -25,13 +25,13 @@
 
 | ID | Task | Agent | Complexity | Status | Dependencies |
 |----|------|-------|-----------|--------|-------------|
-| TASK-001 | Monorepo + tooling init (pnpm + Turborepo) | devops | S | PENDING | - |
-| TASK-002 | Meta directories (sp-tasks, sp-docs, sp-config, sp-plans) | docs | S | PENDING | - |
-| TASK-003 | .claude/ hooks, commands, settings | devops | M | PENDING | TASK-001 |
-| TASK-004 | CLAUDE.md master configuration | docs | M | PENDING | TASK-002 |
-| TASK-005 | Docker dev environment (PostgreSQL, Redis, MinIO, MailHog) | devops | M | PENDING | TASK-001 |
-| TASK-006 | Lint, format, TypeScript config (ESLint, Prettier, strict TS) | devops | S | PENDING | TASK-001 |
-| TASK-007 | Git repo init + first commit | devops | S | PENDING | TASK-001..006 |
+| TASK-001 | Monorepo + tooling init (pnpm + Turborepo) | devops | S | COMPLETED | - |
+| TASK-002 | Meta directories (sp-tasks, sp-docs, sp-config, sp-plans) | docs | S | COMPLETED | - |
+| TASK-003 | .claude/ hooks, commands, settings | devops | M | COMPLETED | TASK-001 |
+| TASK-004 | CLAUDE.md master configuration | docs | M | COMPLETED | TASK-002 |
+| TASK-005 | Docker dev environment (PostgreSQL, Redis, MinIO, MailHog) | devops | M | COMPLETED | TASK-001 |
+| TASK-006 | Lint, format, TypeScript config (ESLint, Prettier, strict TS) | devops | S | COMPLETED | TASK-001 |
+| TASK-007 | Git repo init + first commit | devops | S | COMPLETED | TASK-001..006 |
 
 ## Phase 1: Auth & Multi-Tenancy
 
