@@ -2,6 +2,8 @@ import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
+import { HttpExceptionFilter } from "./modules/common/filters/http-exception.filter";
+import { ResponseInterceptor } from "./modules/common/interceptors/response.interceptor";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -24,6 +26,12 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: true },
     })
   );
+
+  // Global exception filter — formats all HttpExceptions as { error: { ... } }
+  app.useGlobalFilters(new HttpExceptionFilter());
+
+  // Global response interceptor — wraps successful responses in { data, meta? }
+  app.useGlobalInterceptors(new ResponseInterceptor());
 
   // Swagger
   const config = new DocumentBuilder()

@@ -1,0 +1,158 @@
+import type { ApiError, ApiResponse } from "@social-pro/shared-types";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export class ApiRequestError extends Error {
+  public readonly statusCode: number;
+  public readonly code: string;
+  public readonly details: unknown;
+
+  constructor(error: ApiError["error"]) {
+    super(error.message);
+    this.name = "ApiRequestError";
+    this.statusCode = error.statusCode;
+    this.code = error.code;
+    this.details = error.details;
+  }
+}
+
+type RequestOptions = Omit<RequestInit, "method" | "body">;
+
+type JsonBody = Record<string, unknown> | unknown[];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getBaseUrl(): string {
+  const url = process.env["NEXT_PUBLIC_API_URL"];
+  if (!url) {
+    throw new Error(
+      "NEXT_PUBLIC_API_URL is not defined. Add it to your .env.local file."
+    );
+  }
+  return url.replace(/\/$/, "");
+}
+
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") {
+    // Server-side: cookies or headers are handled at the call site if needed
+    return null;
+  }
+  return localStorage.getItem("sp_access_token");
+}
+
+function buildHeaders(extra?: HeadersInit): Headers {
+  const headers = new Headers(extra);
+
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const token = getAuthToken();
+  if (token !== null && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  return headers;
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  // 204 No Content — return undefined cast to T (caller must handle)
+  if (response.status === 204) {
+    return undefined as unknown as T;
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ApiRequestError({
+      statusCode: response.status,
+      code: "PARSE_ERROR",
+      message: `Failed to parse response body (HTTP ${response.status})`,
+    });
+  }
+
+  if (!response.ok) {
+    const errorBody = body as Partial<ApiError>;
+    if (errorBody.error) {
+      throw new ApiRequestError(errorBody.error);
+    }
+    throw new ApiRequestError({
+      statusCode: response.status,
+      code: "UNKNOWN_ERROR",
+      message: `Request failed with status ${response.status}`,
+    });
+  }
+
+  // The API wraps successful responses in { data, meta? }
+  const wrapped = body as ApiResponse<T>;
+  return wrapped.data;
+}
+
+// ---------------------------------------------------------------------------
+// Core request function
+// ---------------------------------------------------------------------------
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: JsonBody,
+  options?: RequestOptions
+): Promise<T> {
+  const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const response = await fetch(url, {
+    ...options,
+    method,
+    headers: buildHeaders(options?.headers),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  return parseResponse<T>(response);
+}
+
+// ---------------------------------------------------------------------------
+// Public API client
+// ---------------------------------------------------------------------------
+
+export const apiClient = {
+  /**
+   * HTTP GET — fetch a resource or collection.
+   * @example const user = await apiClient.get<User>('/auth/me');
+   */
+  get<T>(path: string, options?: RequestOptions): Promise<T> {
+    return request<T>("GET", path, undefined, options);
+  },
+
+  /**
+   * HTTP POST — create a resource.
+   * @example const post = await apiClient.post<Post>('/posts', payload);
+   */
+  post<T>(path: string, body?: JsonBody, options?: RequestOptions): Promise<T> {
+    return request<T>("POST", path, body, options);
+  },
+
+  /**
+   * HTTP PATCH — partially update a resource.
+   * @example const updated = await apiClient.patch<Post>('/posts/1', { title: 'New' });
+   */
+  patch<T>(
+    path: string,
+    body?: JsonBody,
+    options?: RequestOptions
+  ): Promise<T> {
+    return request<T>("PATCH", path, body, options);
+  },
+
+  /**
+   * HTTP DELETE — remove a resource.
+   * @example await apiClient.delete('/posts/1');
+   */
+  delete<T = void>(path: string, options?: RequestOptions): Promise<T> {
+    return request<T>("DELETE", path, undefined, options);
+  },
+} as const;
