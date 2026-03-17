@@ -5,7 +5,7 @@
 | Phase | Name | Total | Done | In Progress | Pending | Blocked |
 |-------|------|-------|------|-------------|---------|---------|
 | 0 | Project Setup | 7 | 7 | 0 | 0 | 0 |
-| 1 | Auth & Multi-Tenancy | 10 | 3 | 2 | 5 | 0 |
+| 1 | Auth & Multi-Tenancy | 10 | 10 | 0 | 0 | 0 |
 | 2 | Client Management | 8 | 0 | 0 | 8 | 0 |
 | 3 | Social Account Connections | 9 | 0 | 0 | 9 | 0 |
 | 4 | Media Upload & Storage | 5 | 0 | 0 | 5 | 0 |
@@ -15,9 +15,9 @@
 | 8 | Billing & Subscriptions | 8 | 0 | 0 | 8 | 0 |
 | 9 | Notifications & Real-time | 7 | 0 | 0 | 7 | 0 |
 | 10 | Polish, Testing & Deploy | 8 | 0 | 0 | 8 | 0 |
-| **Total** | | **87** | **10** | **2** | **75** | **0** |
+| **Total** | | **87** | **17** | **0** | **70** | **0** |
 
-**Progress**: 10/87 (11%)
+**Progress**: 17/87 (20%)
 
 ---
 
@@ -39,14 +39,14 @@
 |----|------|-------|-----------|--------|-------------|
 | TASK-008 | Prisma schema: Agency, User, AgencyMember, Invitation | db | M | COMPLETED | TASK-007 |
 | TASK-009 | NestJS app scaffold + common module (guards, interceptors, filters) | backend | M | COMPLETED | TASK-007 |
-| TASK-010 | Auth module: register, login, JWT, refresh tokens | backend | L | IN_PROGRESS | TASK-009, TASK-008 |
-| TASK-011 | Tenant module: TenantGuard, TenantMiddleware, tenant-scoped Prisma | backend | L | IN_PROGRESS | TASK-009, TASK-008 |
-| TASK-012 | Team module: invitations, role management | backend | M | PENDING | TASK-011, TASK-010 |
+| TASK-010 | Auth module: register, login, JWT, refresh tokens | backend | L | COMPLETED | TASK-009, TASK-008 |
+| TASK-011 | Tenant module: TenantGuard, TenantMiddleware, tenant-scoped Prisma | backend | L | COMPLETED | TASK-009, TASK-008 |
+| TASK-012 | Team module: invitations, role management | backend | M | COMPLETED | TASK-011, TASK-010 |
 | TASK-013 | Next.js app scaffold + Auth.js integration | frontend | M | COMPLETED | TASK-007 |
-| TASK-014 | Login/Register/Forgot-password pages | frontend | M | PENDING | TASK-013, TASK-010 |
-| TASK-015 | Dashboard layout shell (sidebar, header, tenant switcher) | frontend | M | PENDING | TASK-013, TASK-011 |
-| TASK-016 | Team management page (members list, invite, roles) | frontend | M | PENDING | TASK-015, TASK-012 |
-| TASK-017 | Agency settings page | frontend | S | PENDING | TASK-015, TASK-011 |
+| TASK-014 | Login/Register/Forgot-password pages | frontend | M | COMPLETED | TASK-013, TASK-010 |
+| TASK-015 | Dashboard layout shell (sidebar, header, tenant switcher) | frontend | M | COMPLETED | TASK-013, TASK-011 |
+| TASK-016 | Team management page (members list, invite, roles) | frontend | M | COMPLETED | TASK-015, TASK-012 |
+| TASK-017 | Agency settings page | frontend | S | COMPLETED | TASK-015, TASK-011 |
 
 ## Phase 2: Client Management
 
