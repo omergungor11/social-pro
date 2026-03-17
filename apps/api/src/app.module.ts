@@ -9,6 +9,9 @@ import { ClientModule } from "./modules/client/client.module";
 import { SocialAccountModule } from "./modules/social-account/social-account.module";
 import { MediaModule } from "./modules/media/media.module";
 import { PostModule } from "./modules/post/post.module";
+import { AiModule } from "./modules/ai/ai.module";
+import { AnalyticsModule } from "./modules/analytics/analytics.module";
+import { BillingModule } from "./modules/billing/billing.module";
 
 @Module({
   imports: [
@@ -20,6 +23,9 @@ import { PostModule } from "./modules/post/post.module";
     SocialAccountModule,
     MediaModule,
     PostModule,
+    AiModule,
+    AnalyticsModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [],
