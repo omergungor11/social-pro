@@ -4,9 +4,10 @@ import { PrismaModule } from "./modules/common/prisma/prisma.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { TenantModule } from "./modules/tenant/tenant.module";
 import { TenantMiddleware } from "./modules/tenant/tenant.middleware";
+import { TeamModule } from "./modules/team/team.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, TenantModule],
+  imports: [PrismaModule, AuthModule, TenantModule, TeamModule],
   controllers: [AppController],
   providers: [],
 })
