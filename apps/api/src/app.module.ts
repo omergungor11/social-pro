@@ -7,6 +7,8 @@ import { TenantMiddleware } from "./modules/tenant/tenant.middleware";
 import { TeamModule } from "./modules/team/team.module";
 import { ClientModule } from "./modules/client/client.module";
 import { SocialAccountModule } from "./modules/social-account/social-account.module";
+import { MediaModule } from "./modules/media/media.module";
+import { PostModule } from "./modules/post/post.module";
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { SocialAccountModule } from "./modules/social-account/social-account.mod
     TeamModule,
     ClientModule,
     SocialAccountModule,
+    MediaModule,
+    PostModule,
   ],
   controllers: [AppController],
   providers: [],

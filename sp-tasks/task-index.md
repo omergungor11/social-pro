@@ -8,16 +8,16 @@
 | 1 | Auth & Multi-Tenancy | 10 | 10 | 0 | 0 | 0 |
 | 2 | Client Management | 8 | 8 | 0 | 0 | 0 |
 | 3 | Social Account Connections | 9 | 9 | 0 | 0 | 0 |
-| 4 | Media Upload & Storage | 5 | 0 | 0 | 5 | 0 |
-| 5 | Post Creation & Scheduling | 10 | 0 | 0 | 10 | 0 |
+| 4 | Media Upload & Storage | 5 | 5 | 0 | 0 | 0 |
+| 5 | Post Creation & Scheduling | 10 | 10 | 0 | 0 | 0 |
 | 6 | AI Content Generation | 7 | 0 | 0 | 7 | 0 |
 | 7 | Analytics & Reporting | 8 | 0 | 0 | 8 | 0 |
 | 8 | Billing & Subscriptions | 8 | 0 | 0 | 8 | 0 |
 | 9 | Notifications & Real-time | 7 | 0 | 0 | 7 | 0 |
 | 10 | Polish, Testing & Deploy | 8 | 0 | 0 | 8 | 0 |
-| **Total** | | **87** | **34** | **0** | **53** | **0** |
+| **Total** | | **87** | **49** | **0** | **38** | **0** |
 
-**Progress**: 34/87 (39%)
+**Progress**: 49/87 (56%)
 
 ---
 
@@ -79,26 +79,26 @@
 
 | ID | Task | Agent | Complexity | Status | Dependencies |
 |----|------|-------|-----------|--------|-------------|
-| TASK-035 | S3 storage service + MinIO docker config | backend | M | PENDING | TASK-005 |
-| TASK-036 | Media module: upload endpoint, file validation, size limits | backend | M | PENDING | TASK-035, TASK-011 |
-| TASK-037 | Image processing job (resize, thumbnail, optimize) | backend | M | PENDING | TASK-036 |
-| TASK-038 | Video processing job (transcode, thumbnail extraction) | backend | L | PENDING | TASK-036 |
-| TASK-039 | Media upload UI component (drag-drop, progress, preview) | frontend | M | PENDING | TASK-036 |
+| TASK-035 | S3 storage service + MinIO docker config | backend | M | COMPLETED | TASK-005 |
+| TASK-036 | Media module: upload endpoint, file validation, size limits | backend | M | COMPLETED | TASK-035, TASK-011 |
+| TASK-037 | Image processing job (resize, thumbnail, optimize) | backend | M | COMPLETED | TASK-036 |
+| TASK-038 | Video processing job (transcode, thumbnail extraction) | backend | L | COMPLETED | TASK-036 |
+| TASK-039 | Media upload UI component (drag-drop, progress, preview) | frontend | M | COMPLETED | TASK-036 |
 
 ## Phase 5: Post Creation & Scheduling
 
 | ID | Task | Agent | Complexity | Status | Dependencies |
 |----|------|-------|-----------|--------|-------------|
-| TASK-040 | Prisma schema: Post, PostMedia, PostTarget, PostApproval | db | M | PENDING | TASK-026 |
-| TASK-041 | Post module: CRUD service + controller | backend | L | PENDING | TASK-040, TASK-011 |
-| TASK-042 | Post scheduling service (BullMQ delayed jobs) | backend | L | PENDING | TASK-041 |
-| TASK-043 | Publisher base service + platform adapter pattern | backend | L | PENDING | TASK-041, TASK-027 |
-| TASK-044 | Twitter publisher adapter | backend | M | PENDING | TASK-043 |
-| TASK-045 | Facebook/Instagram publisher adapter | backend | M | PENDING | TASK-043 |
-| TASK-046 | LinkedIn publisher adapter | backend | M | PENDING | TASK-043 |
-| TASK-047 | TikTok + YouTube publisher adapters | backend | L | PENDING | TASK-043 |
-| TASK-048 | Post creation/edit page (rich editor, platform preview, media) | frontend | L | PENDING | TASK-015, TASK-041, TASK-039 |
-| TASK-049 | Post list + calendar view page | frontend | L | PENDING | TASK-015, TASK-041 |
+| TASK-040 | Prisma schema: Post, PostMedia, PostTarget, PostApproval | db | M | COMPLETED | TASK-026 |
+| TASK-041 | Post module: CRUD service + controller | backend | L | COMPLETED | TASK-040, TASK-011 |
+| TASK-042 | Post scheduling service (BullMQ delayed jobs) | backend | L | COMPLETED | TASK-041 |
+| TASK-043 | Publisher base service + platform adapter pattern | backend | L | COMPLETED | TASK-041, TASK-027 |
+| TASK-044 | Twitter publisher adapter | backend | M | COMPLETED | TASK-043 |
+| TASK-045 | Facebook/Instagram publisher adapter | backend | M | COMPLETED | TASK-043 |
+| TASK-046 | LinkedIn publisher adapter | backend | M | COMPLETED | TASK-043 |
+| TASK-047 | TikTok + YouTube publisher adapters | backend | L | COMPLETED | TASK-043 |
+| TASK-048 | Post creation/edit page (rich editor, platform preview, media) | frontend | L | COMPLETED | TASK-015, TASK-041, TASK-039 |
+| TASK-049 | Post list + calendar view page | frontend | L | COMPLETED | TASK-015, TASK-041 |
 
 ## Phase 6: AI Content Generation
 
