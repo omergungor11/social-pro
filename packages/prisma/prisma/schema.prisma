@@ -528,6 +528,19 @@ model NotificationPreference {
   @@unique([userId, agencyId, channel, type])
 }
 
+// === Webhook Events ===
+
+model RawWebhookEvent {
+  id        String         @id @default(cuid())
+  platform  SocialPlatform
+  eventType String?
+  payload   Json
+  processed Boolean        @default(false)
+  createdAt DateTime       @default(now())
+
+  @@index([platform, createdAt])
+}
+
 // === Audit ===
 
 model AuditLog {

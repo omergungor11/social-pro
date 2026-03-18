@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -21,6 +21,9 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useNotificationStore } from "@/stores/notification-store";
+import { NotificationDropdown } from "@/components/dashboard/notification-dropdown";
+import { useRealtime } from "@/hooks/use-realtime";
 
 // ---------------------------------------------------------------------------
 // Nav items definition
@@ -290,6 +293,10 @@ interface HeaderProps {
 function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
   const pathname = usePathname();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const isOpen = useNotificationStore((s) => s.isOpen);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const toggleOpen = useNotificationStore((s) => s.toggleOpen);
+  const setOpen = useNotificationStore((s) => s.setOpen);
 
   // Build breadcrumb from pathname
   function getBreadcrumb(): { label: string; href?: string }[] {
@@ -369,24 +376,41 @@ function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
       {/* Right actions */}
       <div className="flex items-center gap-2 shrink-0">
         {/* Notifications */}
-        <button
-          type="button"
-          className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-          aria-label="View notifications"
-        >
-          <Bell className="h-5 w-5" />
-          {/* Unread dot */}
-          <span
-            className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-600 ring-2 ring-white"
-            aria-hidden="true"
-          />
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              toggleOpen();
+              // Close user menu if open
+              setUserMenuOpen(false);
+            }}
+            className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+            aria-label="View notifications"
+            aria-haspopup="dialog"
+            aria-expanded={isOpen}
+          >
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white ring-2 ring-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </button>
+
+          {isOpen && (
+            <NotificationDropdown />
+          )}
+        </div>
 
         {/* User menu */}
         <div className="relative">
           <button
             type="button"
-            onClick={() => setUserMenuOpen((o) => !o)}
+            onClick={() => {
+              setUserMenuOpen((o) => !o);
+              // Close notification dropdown if open
+              setOpen(false);
+            }}
             className="flex items-center gap-2 rounded-lg pl-1 pr-2 py-1 hover:bg-slate-100 transition-colors"
             aria-haspopup="true"
             aria-expanded={userMenuOpen}
@@ -509,6 +533,11 @@ function MobileDrawer({
 // DashboardShell (root export)
 // ---------------------------------------------------------------------------
 
+function RealtimeProvider(): null {
+  useRealtime();
+  return null;
+}
+
 export function DashboardShell({
   children,
 }: {
@@ -516,9 +545,17 @@ export function DashboardShell({
 }): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount);
+
+  useEffect(() => {
+    void fetchUnreadCount();
+  }, [fetchUnreadCount]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
+      {/* Real-time WebSocket provider — renders nothing, just hooks */}
+      <RealtimeProvider />
+
       {/* Desktop sidebar */}
       <div className="hidden md:flex md:flex-col md:shrink-0">
         <Sidebar

@@ -12,6 +12,9 @@ import { PostModule } from "./modules/post/post.module";
 import { AiModule } from "./modules/ai/ai.module";
 import { AnalyticsModule } from "./modules/analytics/analytics.module";
 import { BillingModule } from "./modules/billing/billing.module";
+import { NotificationModule } from "./modules/notification/notification.module";
+import { AuditModule } from "./modules/audit/audit.module";
+import { WebhookModule } from "./modules/webhook/webhook.module";
 
 @Module({
   imports: [
@@ -26,6 +29,9 @@ import { BillingModule } from "./modules/billing/billing.module";
     AiModule,
     AnalyticsModule,
     BillingModule,
+    NotificationModule,
+    AuditModule,
+    WebhookModule,
   ],
   controllers: [AppController],
   providers: [],
