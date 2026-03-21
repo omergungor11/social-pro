@@ -87,6 +87,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
         localStorage.removeItem("sp_access_token");
         localStorage.removeItem("sp_refresh_token");
         window.location.href = "/login";
+        // Return a never-resolving promise to prevent further execution while redirecting
+        return new Promise<never>(() => {});
       }
     }
 
