@@ -80,10 +80,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     // Auto-redirect to login on 401 (expired/missing token)
+    // Skip redirect if already on login/register pages to avoid infinite loop
     if (response.status === 401 && typeof window !== "undefined") {
-      localStorage.removeItem("sp_access_token");
-      localStorage.removeItem("sp_refresh_token");
-      window.location.href = "/login";
+      const isAuthPage = window.location.pathname.startsWith("/login") || window.location.pathname.startsWith("/register");
+      if (!isAuthPage) {
+        localStorage.removeItem("sp_access_token");
+        localStorage.removeItem("sp_refresh_token");
+        window.location.href = "/login";
+      }
     }
 
     const errorBody = body as Partial<ApiError>;

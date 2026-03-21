@@ -132,17 +132,17 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException("Invalid email or password");
+      throw new UnauthorizedException("No account found with this email address");
     }
 
     const passwordValid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordValid) {
-      throw new UnauthorizedException("Invalid email or password");
+      throw new UnauthorizedException("Incorrect password. Please try again");
     }
 
     const membership = user.memberships[0];
     if (!membership) {
-      throw new UnauthorizedException("User has no agency membership");
+      throw new UnauthorizedException("Your account is not linked to any agency. Please contact support");
     }
 
     const tokens = await this.generateTokens({

@@ -84,10 +84,8 @@ export default function LoginPage(): React.JSX.Element {
     } catch (err) {
       let message = "An unexpected error occurred. Please try again.";
       if (err instanceof ApiRequestError) {
-        if (err.statusCode === 401 || err.statusCode === 400) {
-          message = "Invalid email or password.";
-        } else if (err.statusCode === 429) {
-          message = "Too many attempts. Try again later.";
+        if (err.statusCode === 429) {
+          message = "Too many attempts. Please try again later.";
         } else {
           message = err.message;
         }
