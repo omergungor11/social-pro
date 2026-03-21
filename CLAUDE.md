@@ -21,7 +21,7 @@ Social Pro — ajanslar icin kapsamli sosyal medya yonetim ve musteri yonetim pa
 
 ## Mevcut Durum
 
-**Progress**: 79/87 task (%91) — Phase 0-9 tamamlandi, Phase 10 basliyor.
+**Progress**: 79/87 task (%91) — Phase 0-9 tamamlandi, Phase 10 basliyor. Dev ortam calisiyor, frontend sayfalari zenginlestirildi.
 
 > Her yeni session'da `sp-tasks/task-index.md` oku veya `/cold-start` calistir.
 
