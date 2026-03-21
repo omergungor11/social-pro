@@ -34,11 +34,9 @@ export default function LoginPage(): React.JSX.Element {
   useEffect(() => {
     if (!DEV_MODE) return;
 
-    const existing = localStorage.getItem("sp_access_token");
-    if (existing) {
-      router.push("/dashboard");
-      return;
-    }
+    // Clear any stale token and always re-login in dev mode
+    localStorage.removeItem("sp_access_token");
+    localStorage.removeItem("sp_refresh_token");
 
     async function autoLogin() {
       try {
