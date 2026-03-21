@@ -1,8 +1,10 @@
 import { Module } from "@nestjs/common";
 import { PrismaModule } from "../common/prisma/prisma.module";
 import { SocialAccountController } from "./social-account.controller";
+import { OAuthConfigController } from "./oauth-config.controller";
 import { SocialAccountService } from "./social-account.service";
 import { EncryptionService } from "./services/encryption.service";
+import { OAuthConfigService } from "./services/oauth-config.service";
 import { PlatformRegistryService } from "./services/platform-registry.service";
 import { TwitterConnector } from "./connectors/twitter.connector";
 import { FacebookConnector } from "./connectors/facebook.connector";
@@ -24,17 +26,19 @@ import { TokenRefreshJob } from "./jobs/token-refresh.job";
  *  - Token refresh (manual + scheduled via SocialAccountQueueModule)
  *  - Account health checks
  *  - Secure disconnect (token revocation + DB deletion)
+ *  - Centralized OAuth credential management (DB-first with env fallback)
  *
  * To enable background token refresh, also import SocialAccountQueueModule
  * in AppModule alongside this module.
  */
 @Module({
   imports: [PrismaModule],
-  controllers: [SocialAccountController],
+  controllers: [SocialAccountController, OAuthConfigController],
   providers: [
     // Core services
     SocialAccountService,
     EncryptionService,
+    OAuthConfigService,
     PlatformRegistryService,
 
     // Platform connectors
@@ -48,6 +52,6 @@ import { TokenRefreshJob } from "./jobs/token-refresh.job";
     // Job handler (stateless; queue registration lives in SocialAccountQueueModule)
     TokenRefreshJob,
   ],
-  exports: [SocialAccountService],
+  exports: [SocialAccountService, OAuthConfigService],
 })
 export class SocialAccountModule {}

@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import type {
   OAuthConnector,
+  OAuthCredentials,
   OAuthTokens,
   SocialProfile,
 } from "../interfaces/oauth-connector.interface";
@@ -15,9 +12,8 @@ import type {
  * Exchanges the short-lived code for a long-lived token via the
  * server-side exchange endpoint after the initial code exchange.
  *
- * Required environment variables:
- *   FACEBOOK_CLIENT_ID
- *   FACEBOOK_CLIENT_SECRET
+ * Credentials are passed per-call from OAuthConfigService instead of being
+ * read from environment variables directly.
  */
 @Injectable()
 export class FacebookConnector implements OAuthConnector {
@@ -36,23 +32,20 @@ export class FacebookConnector implements OAuthConnector {
     "read_insights",
   ];
 
-  private get clientId(): string {
-    const id = process.env["FACEBOOK_CLIENT_ID"];
-    if (!id) throw new BadRequestException("Facebook connection is not configured. Please add FACEBOOK_CLIENT_ID to your environment.");
-    return id;
-  }
+  getAuthUrl(
+    state: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): string {
+    const effectiveScopes =
+      credentials.scopes && credentials.scopes.length > 0
+        ? credentials.scopes
+        : this.scopes;
 
-  private get clientSecret(): string {
-    const secret = process.env["FACEBOOK_CLIENT_SECRET"];
-    if (!secret) throw new BadRequestException("Facebook connection is not configured. Please add FACEBOOK_CLIENT_SECRET to your environment.");
-    return secret;
-  }
-
-  getAuthUrl(state: string, redirectUri: string): string {
     const params = new URLSearchParams({
-      client_id: this.clientId,
+      client_id: credentials.clientId,
       redirect_uri: redirectUri,
-      scope: this.scopes.join(","),
+      scope: effectiveScopes.join(","),
       state,
       response_type: "code",
     });
@@ -60,11 +53,15 @@ export class FacebookConnector implements OAuthConnector {
     return `${this.authUrl}?${params.toString()}`;
   }
 
-  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  async exchangeCode(
+    code: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     // Step 1: exchange code for short-lived token
     const params = new URLSearchParams({
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       redirect_uri: redirectUri,
       code,
     });
@@ -74,7 +71,7 @@ export class FacebookConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Facebook token exchange failed: ${errorText}`
+        `Facebook token exchange failed: ${errorText}`,
       );
     }
 
@@ -85,30 +82,31 @@ export class FacebookConnector implements OAuthConnector {
     };
 
     // Step 2: exchange short-lived token for long-lived token (~60 days)
-    return this.exchangeForLongLivedToken(shortLived.access_token);
+    return this.exchangeForLongLivedToken(shortLived.access_token, credentials);
   }
 
   /**
    * Exchanges a short-lived user access token for a long-lived one (~60 days).
    */
   private async exchangeForLongLivedToken(
-    shortLivedToken: string
+    shortLivedToken: string,
+    credentials: OAuthCredentials,
   ): Promise<OAuthTokens> {
     const params = new URLSearchParams({
       grant_type: "fb_exchange_token",
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       fb_exchange_token: shortLivedToken,
     });
 
     const response = await fetch(
-      `${this.longLivedTokenUrl}?${params.toString()}`
+      `${this.longLivedTokenUrl}?${params.toString()}`,
     );
 
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Facebook long-lived token exchange failed: ${errorText}`
+        `Facebook long-lived token exchange failed: ${errorText}`,
       );
     }
 
@@ -134,17 +132,23 @@ export class FacebookConnector implements OAuthConnector {
    * Re-issuing is done by re-authenticating. Here we attempt to extend via
    * the long-lived exchange endpoint with the existing token.
    */
-  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
+  async refreshToken(
+    refreshTokenValue: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     // Facebook does not use standard refresh tokens; re-exchange the token
-    return this.exchangeForLongLivedToken(refreshTokenValue);
+    return this.exchangeForLongLivedToken(refreshTokenValue, credentials);
   }
 
-  async revokeToken(accessToken: string): Promise<void> {
+  async revokeToken(
+    accessToken: string,
+    _credentials: OAuthCredentials,
+  ): Promise<void> {
     // Requires the user ID; fetch it first
     try {
       const meParams = new URLSearchParams({ access_token: accessToken });
       const meResponse = await fetch(
-        `${this.profileUrl}?${meParams.toString()}`
+        `${this.profileUrl}?${meParams.toString()}`,
       );
       if (!meResponse.ok) return;
 
@@ -152,7 +156,7 @@ export class FacebookConnector implements OAuthConnector {
       const deleteParams = new URLSearchParams({ access_token: accessToken });
       await fetch(
         `https://graph.facebook.com/${this.apiVersion}/${me.id}/permissions?${deleteParams.toString()}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
     } catch {
       // Best-effort revocation
@@ -170,7 +174,7 @@ export class FacebookConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Facebook profile fetch failed: ${errorText}`
+        `Facebook profile fetch failed: ${errorText}`,
       );
     }
 

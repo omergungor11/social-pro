@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import type {
   OAuthConnector,
+  OAuthCredentials,
   OAuthTokens,
   SocialProfile,
 } from "../interfaces/oauth-connector.interface";
@@ -15,9 +12,8 @@ import type {
  * Uses TikTok's v2 OAuth endpoints. The authorization code flow is
  * standard; the token response differs slightly from RFC 6749.
  *
- * Required environment variables:
- *   TIKTOK_CLIENT_ID   (also called "client_key" in TikTok docs)
- *   TIKTOK_CLIENT_SECRET
+ * Credentials are passed per-call from OAuthConfigService instead of being
+ * read from environment variables directly.
  */
 @Injectable()
 export class TiktokConnector implements OAuthConnector {
@@ -37,23 +33,20 @@ export class TiktokConnector implements OAuthConnector {
     "video.publish",
   ];
 
-  private get clientId(): string {
-    const id = process.env["TIKTOK_CLIENT_ID"];
-    if (!id) throw new BadRequestException("TikTok connection is not configured. Please add TIKTOK_CLIENT_ID to your environment.");
-    return id;
-  }
+  getAuthUrl(
+    state: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): string {
+    const effectiveScopes =
+      credentials.scopes && credentials.scopes.length > 0
+        ? credentials.scopes
+        : this.scopes;
 
-  private get clientSecret(): string {
-    const secret = process.env["TIKTOK_CLIENT_SECRET"];
-    if (!secret) throw new BadRequestException("TikTok connection is not configured. Please add TIKTOK_CLIENT_SECRET to your environment.");
-    return secret;
-  }
-
-  getAuthUrl(state: string, redirectUri: string): string {
     const params = new URLSearchParams({
-      client_key: this.clientId,
+      client_key: credentials.clientId,
       response_type: "code",
-      scope: this.scopes.join(","),
+      scope: effectiveScopes.join(","),
       redirect_uri: redirectUri,
       state,
     });
@@ -61,10 +54,14 @@ export class TiktokConnector implements OAuthConnector {
     return `${this.authUrl}?${params.toString()}`;
   }
 
-  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  async exchangeCode(
+    code: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const body = new URLSearchParams({
-      client_key: this.clientId,
-      client_secret: this.clientSecret,
+      client_key: credentials.clientId,
+      client_secret: credentials.clientSecret,
       code,
       grant_type: "authorization_code",
       redirect_uri: redirectUri,
@@ -79,7 +76,7 @@ export class TiktokConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `TikTok token exchange failed: ${errorText}`
+        `TikTok token exchange failed: ${errorText}`,
       );
     }
 
@@ -98,17 +95,20 @@ export class TiktokConnector implements OAuthConnector {
 
     if (data.error ?? !data.data) {
       throw new UnauthorizedException(
-        `TikTok token exchange error: ${data.error_description ?? data.error ?? "Unknown error"}`
+        `TikTok token exchange error: ${data.error_description ?? data.error ?? "Unknown error"}`,
       );
     }
 
     return this.mapTokenResponse(data.data!);
   }
 
-  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
+  async refreshToken(
+    refreshTokenValue: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const body = new URLSearchParams({
-      client_key: this.clientId,
-      client_secret: this.clientSecret,
+      client_key: credentials.clientId,
+      client_secret: credentials.clientSecret,
       grant_type: "refresh_token",
       refresh_token: refreshTokenValue,
     });
@@ -122,7 +122,7 @@ export class TiktokConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `TikTok token refresh failed: ${errorText}`
+        `TikTok token refresh failed: ${errorText}`,
       );
     }
 
@@ -140,17 +140,20 @@ export class TiktokConnector implements OAuthConnector {
 
     if (data.error ?? !data.data) {
       throw new UnauthorizedException(
-        `TikTok token refresh error: ${data.error_description ?? data.error ?? "Unknown error"}`
+        `TikTok token refresh error: ${data.error_description ?? data.error ?? "Unknown error"}`,
       );
     }
 
     return this.mapTokenResponse(data.data!);
   }
 
-  async revokeToken(accessToken: string): Promise<void> {
+  async revokeToken(
+    accessToken: string,
+    credentials: OAuthCredentials,
+  ): Promise<void> {
     const body = new URLSearchParams({
-      client_key: this.clientId,
-      client_secret: this.clientSecret,
+      client_key: credentials.clientId,
+      client_secret: credentials.clientSecret,
       token: accessToken,
     });
 
@@ -178,7 +181,7 @@ export class TiktokConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `TikTok profile fetch failed: ${errorText}`
+        `TikTok profile fetch failed: ${errorText}`,
       );
     }
 
@@ -198,7 +201,7 @@ export class TiktokConnector implements OAuthConnector {
     const user = json.data?.user;
     if (!user) {
       throw new UnauthorizedException(
-        `TikTok profile fetch error: ${json.error?.message ?? "No user data returned"}`
+        `TikTok profile fetch error: ${json.error?.message ?? "No user data returned"}`,
       );
     }
 

@@ -542,6 +542,21 @@ model RawWebhookEvent {
   @@index([platform, createdAt])
 }
 
+// === Platform OAuth Config (system-level) ===
+
+model PlatformOAuthConfig {
+  id           String         @id @default(cuid())
+  platform     SocialPlatform @unique
+  clientId     String         // AES-256-GCM encrypted
+  clientSecret String         // AES-256-GCM encrypted
+  redirectUri  String?        // override; if null, computed from API_URL
+  scopes       String[]       @default([])
+  isEnabled    Boolean        @default(true)
+  metadata     Json           @default("{}")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
 // === Audit ===
 
 model AuditLog {

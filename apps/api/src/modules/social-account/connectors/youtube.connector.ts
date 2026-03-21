@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import type {
   OAuthConnector,
+  OAuthCredentials,
   OAuthTokens,
   SocialProfile,
 } from "../interfaces/oauth-connector.interface";
@@ -15,9 +12,8 @@ import type {
  * Uses Google's standard OAuth 2.0 Authorization Code flow. The profile is
  * fetched from the YouTube Data API v3 channels endpoint.
  *
- * Required environment variables:
- *   YOUTUBE_CLIENT_ID
- *   YOUTUBE_CLIENT_SECRET
+ * Credentials are passed per-call from OAuthConfigService instead of being
+ * read from environment variables directly.
  */
 @Injectable()
 export class YoutubeConnector implements OAuthConnector {
@@ -35,37 +31,38 @@ export class YoutubeConnector implements OAuthConnector {
     "https://www.googleapis.com/auth/userinfo.profile",
   ];
 
-  private get clientId(): string {
-    const id = process.env["YOUTUBE_CLIENT_ID"];
-    if (!id) throw new BadRequestException("YouTube connection is not configured. Please add YOUTUBE_CLIENT_ID to your environment.");
-    return id;
-  }
+  getAuthUrl(
+    state: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): string {
+    const effectiveScopes =
+      credentials.scopes && credentials.scopes.length > 0
+        ? credentials.scopes
+        : this.scopes;
 
-  private get clientSecret(): string {
-    const secret = process.env["YOUTUBE_CLIENT_SECRET"];
-    if (!secret) throw new BadRequestException("YouTube connection is not configured. Please add YOUTUBE_CLIENT_SECRET to your environment.");
-    return secret;
-  }
-
-  getAuthUrl(state: string, redirectUri: string): string {
     const params = new URLSearchParams({
-      client_id: this.clientId,
+      client_id: credentials.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: this.scopes.join(" "),
+      scope: effectiveScopes.join(" "),
       state,
       access_type: "offline", // Required to receive a refresh token
-      prompt: "consent",      // Force consent screen to always get refresh token
+      prompt: "consent", // Force consent screen to always get refresh token
     });
 
     return `${this.authUrl}?${params.toString()}`;
   }
 
-  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  async exchangeCode(
+    code: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const body = new URLSearchParams({
       code,
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
     });
@@ -79,7 +76,7 @@ export class YoutubeConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `YouTube token exchange failed: ${errorText}`
+        `YouTube token exchange failed: ${errorText}`,
       );
     }
 
@@ -94,10 +91,13 @@ export class YoutubeConnector implements OAuthConnector {
     return this.mapTokenResponse(data);
   }
 
-  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
+  async refreshToken(
+    refreshTokenValue: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const body = new URLSearchParams({
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       refresh_token: refreshTokenValue,
       grant_type: "refresh_token",
     });
@@ -111,7 +111,7 @@ export class YoutubeConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `YouTube token refresh failed: ${errorText}`
+        `YouTube token refresh failed: ${errorText}`,
       );
     }
 
@@ -127,7 +127,10 @@ export class YoutubeConnector implements OAuthConnector {
     return this.mapTokenResponse(data);
   }
 
-  async revokeToken(accessToken: string): Promise<void> {
+  async revokeToken(
+    accessToken: string,
+    _credentials: OAuthCredentials,
+  ): Promise<void> {
     const params = new URLSearchParams({ token: accessToken });
 
     await fetch(`${this.revokeUrl}?${params.toString()}`, {
@@ -150,7 +153,7 @@ export class YoutubeConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `YouTube profile fetch failed: ${errorText}`
+        `YouTube profile fetch failed: ${errorText}`,
       );
     }
 
@@ -170,7 +173,7 @@ export class YoutubeConnector implements OAuthConnector {
     const channel = json.items?.[0];
     if (!channel) {
       throw new UnauthorizedException(
-        "YouTube profile fetch: no channel found for this account"
+        "YouTube profile fetch: no channel found for this account",
       );
     }
 

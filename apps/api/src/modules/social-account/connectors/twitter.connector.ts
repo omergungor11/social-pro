@@ -1,11 +1,8 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { randomBytes, createHash } from "node:crypto";
 import type {
   OAuthConnector,
+  OAuthCredentials,
   OAuthTokens,
   SocialProfile,
 } from "../interfaces/oauth-connector.interface";
@@ -13,9 +10,8 @@ import type {
 /**
  * Twitter (X) OAuth 2.0 connector using PKCE (Proof Key for Code Exchange).
  *
- * Required environment variables:
- *   TWITTER_CLIENT_ID
- *   TWITTER_CLIENT_SECRET
+ * Credentials are passed per-call from OAuthConfigService instead of being
+ * read from environment variables directly.
  */
 @Injectable()
 export class TwitterConnector implements OAuthConnector {
@@ -29,18 +25,6 @@ export class TwitterConnector implements OAuthConnector {
     "users.read",
     "offline.access",
   ];
-
-  private get clientId(): string {
-    const id = process.env["TWITTER_CLIENT_ID"];
-    if (!id) throw new BadRequestException("Twitter/X connection is not configured. Please add TWITTER_CLIENT_ID to your environment.");
-    return id;
-  }
-
-  private get clientSecret(): string {
-    const secret = process.env["TWITTER_CLIENT_SECRET"];
-    if (!secret) throw new BadRequestException("Twitter/X connection is not configured. Please add TWITTER_CLIENT_SECRET to your environment.");
-    return secret;
-  }
 
   /**
    * Generates a PKCE code verifier (random 43-128 char string).
@@ -62,18 +46,27 @@ export class TwitterConnector implements OAuthConnector {
    * contain the PKCE verifier as `<agencyId>:<codeVerifier>` (callers must
    * split on first colon to separate them).
    */
-  getAuthUrl(state: string, redirectUri: string): string {
+  getAuthUrl(
+    state: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): string {
     const codeVerifier = this.generateCodeVerifier();
     const codeChallenge = this.generateCodeChallenge(codeVerifier);
 
     // Append the verifier to the state so callback can reconstruct it
     const stateWithVerifier = `${state}:${codeVerifier}`;
 
+    const effectiveScopes =
+      credentials.scopes && credentials.scopes.length > 0
+        ? credentials.scopes
+        : this.scopes;
+
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: this.clientId,
+      client_id: credentials.clientId,
       redirect_uri: redirectUri,
-      scope: this.scopes.join(" "),
+      scope: effectiveScopes.join(" "),
       state: stateWithVerifier,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
@@ -89,14 +82,19 @@ export class TwitterConnector implements OAuthConnector {
    * the interface does not expose a separate verifier argument, callers
    * should pass `code` as `<code>:<codeVerifier>` (colon-separated).
    */
-  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  async exchangeCode(
+    code: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     // Convention: code is passed as "<authCode>:<codeVerifier>"
     const separatorIndex = code.indexOf(":");
     const authCode = separatorIndex >= 0 ? code.slice(0, separatorIndex) : code;
-    const codeVerifier = separatorIndex >= 0 ? code.slice(separatorIndex + 1) : "";
+    const codeVerifier =
+      separatorIndex >= 0 ? code.slice(separatorIndex + 1) : "";
 
-    const credentials = Buffer.from(
-      `${this.clientId}:${this.clientSecret}`
+    const basicCredentials = Buffer.from(
+      `${credentials.clientId}:${credentials.clientSecret}`,
     ).toString("base64");
 
     const body = new URLSearchParams({
@@ -110,7 +108,7 @@ export class TwitterConnector implements OAuthConnector {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${credentials}`,
+        Authorization: `Basic ${basicCredentials}`,
       },
       body: body.toString(),
     });
@@ -118,7 +116,7 @@ export class TwitterConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Twitter token exchange failed: ${errorText}`
+        `Twitter token exchange failed: ${errorText}`,
       );
     }
 
@@ -132,9 +130,12 @@ export class TwitterConnector implements OAuthConnector {
     return this.mapTokenResponse(data);
   }
 
-  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
-    const credentials = Buffer.from(
-      `${this.clientId}:${this.clientSecret}`
+  async refreshToken(
+    refreshTokenValue: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
+    const basicCredentials = Buffer.from(
+      `${credentials.clientId}:${credentials.clientSecret}`,
     ).toString("base64");
 
     const body = new URLSearchParams({
@@ -146,7 +147,7 @@ export class TwitterConnector implements OAuthConnector {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${credentials}`,
+        Authorization: `Basic ${basicCredentials}`,
       },
       body: body.toString(),
     });
@@ -154,7 +155,7 @@ export class TwitterConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Twitter token refresh failed: ${errorText}`
+        `Twitter token refresh failed: ${errorText}`,
       );
     }
 
@@ -168,9 +169,12 @@ export class TwitterConnector implements OAuthConnector {
     return this.mapTokenResponse(data);
   }
 
-  async revokeToken(accessToken: string): Promise<void> {
-    const credentials = Buffer.from(
-      `${this.clientId}:${this.clientSecret}`
+  async revokeToken(
+    accessToken: string,
+    credentials: OAuthCredentials,
+  ): Promise<void> {
+    const basicCredentials = Buffer.from(
+      `${credentials.clientId}:${credentials.clientSecret}`,
     ).toString("base64");
 
     const body = new URLSearchParams({
@@ -182,7 +186,7 @@ export class TwitterConnector implements OAuthConnector {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${credentials}`,
+        Authorization: `Basic ${basicCredentials}`,
       },
       body: body.toString(),
     });
@@ -201,7 +205,7 @@ export class TwitterConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Twitter profile fetch failed: ${errorText}`
+        `Twitter profile fetch failed: ${errorText}`,
       );
     }
 

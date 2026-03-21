@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import type {
   OAuthConnector,
+  OAuthCredentials,
   OAuthTokens,
   SocialProfile,
 } from "../interfaces/oauth-connector.interface";
@@ -16,9 +13,8 @@ import type {
  * and profile endpoints. Requires an Instagram Business or Creator account
  * linked to a Facebook Page.
  *
- * Required environment variables:
- *   INSTAGRAM_CLIENT_ID
- *   INSTAGRAM_CLIENT_SECRET
+ * Credentials are passed per-call from OAuthConfigService instead of being
+ * read from environment variables directly.
  */
 @Injectable()
 export class InstagramConnector implements OAuthConnector {
@@ -34,23 +30,20 @@ export class InstagramConnector implements OAuthConnector {
     "pages_read_engagement",
   ];
 
-  private get clientId(): string {
-    const id = process.env["INSTAGRAM_CLIENT_ID"];
-    if (!id) throw new BadRequestException("Instagram connection is not configured. Please add INSTAGRAM_CLIENT_ID to your environment.");
-    return id;
-  }
+  getAuthUrl(
+    state: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): string {
+    const effectiveScopes =
+      credentials.scopes && credentials.scopes.length > 0
+        ? credentials.scopes
+        : this.scopes;
 
-  private get clientSecret(): string {
-    const secret = process.env["INSTAGRAM_CLIENT_SECRET"];
-    if (!secret) throw new BadRequestException("Instagram connection is not configured. Please add INSTAGRAM_CLIENT_SECRET to your environment.");
-    return secret;
-  }
-
-  getAuthUrl(state: string, redirectUri: string): string {
     const params = new URLSearchParams({
-      client_id: this.clientId,
+      client_id: credentials.clientId,
       redirect_uri: redirectUri,
-      scope: this.scopes.join(","),
+      scope: effectiveScopes.join(","),
       state,
       response_type: "code",
     });
@@ -58,10 +51,14 @@ export class InstagramConnector implements OAuthConnector {
     return `${this.authUrl}?${params.toString()}`;
   }
 
-  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  async exchangeCode(
+    code: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const params = new URLSearchParams({
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       redirect_uri: redirectUri,
       code,
     });
@@ -71,7 +68,7 @@ export class InstagramConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Instagram token exchange failed: ${errorText}`
+        `Instagram token exchange failed: ${errorText}`,
       );
     }
 
@@ -81,16 +78,17 @@ export class InstagramConnector implements OAuthConnector {
     };
 
     // Exchange for long-lived token
-    return this.exchangeForLongLivedToken(shortLived.access_token);
+    return this.exchangeForLongLivedToken(shortLived.access_token, credentials);
   }
 
   private async exchangeForLongLivedToken(
-    shortLivedToken: string
+    shortLivedToken: string,
+    credentials: OAuthCredentials,
   ): Promise<OAuthTokens> {
     const params = new URLSearchParams({
       grant_type: "fb_exchange_token",
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       fb_exchange_token: shortLivedToken,
     });
 
@@ -99,7 +97,7 @@ export class InstagramConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Instagram long-lived token exchange failed: ${errorText}`
+        `Instagram long-lived token exchange failed: ${errorText}`,
       );
     }
 
@@ -120,17 +118,23 @@ export class InstagramConnector implements OAuthConnector {
     };
   }
 
-  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
+  async refreshToken(
+    refreshTokenValue: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     // Same pattern as Facebook — re-exchange the existing long-lived token
-    return this.exchangeForLongLivedToken(refreshTokenValue);
+    return this.exchangeForLongLivedToken(refreshTokenValue, credentials);
   }
 
-  async revokeToken(accessToken: string): Promise<void> {
+  async revokeToken(
+    accessToken: string,
+    _credentials: OAuthCredentials,
+  ): Promise<void> {
     // Revoke by deleting permissions on the Facebook app
     try {
       const meParams = new URLSearchParams({ access_token: accessToken });
       const meResponse = await fetch(
-        `https://graph.facebook.com/me?${meParams.toString()}`
+        `https://graph.facebook.com/me?${meParams.toString()}`,
       );
       if (!meResponse.ok) return;
 
@@ -138,7 +142,7 @@ export class InstagramConnector implements OAuthConnector {
       const deleteParams = new URLSearchParams({ access_token: accessToken });
       await fetch(
         `https://graph.facebook.com/${this.apiVersion}/${me.id}/permissions?${deleteParams.toString()}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
     } catch {
       // Best-effort revocation
@@ -148,18 +152,19 @@ export class InstagramConnector implements OAuthConnector {
   async getUserProfile(accessToken: string): Promise<SocialProfile> {
     // Fetch the connected Facebook user to find their Instagram Business Account
     const meParams = new URLSearchParams({
-      fields: "id,name,accounts{instagram_business_account{id,name,username,profile_picture_url}}",
+      fields:
+        "id,name,accounts{instagram_business_account{id,name,username,profile_picture_url}}",
       access_token: accessToken,
     });
 
     const response = await fetch(
-      `https://graph.facebook.com/me?${meParams.toString()}`
+      `https://graph.facebook.com/me?${meParams.toString()}`,
     );
 
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `Instagram profile fetch failed: ${errorText}`
+        `Instagram profile fetch failed: ${errorText}`,
       );
     }
 
@@ -180,7 +185,7 @@ export class InstagramConnector implements OAuthConnector {
 
     // Attempt to extract the first Instagram Business Account
     const igAccount = data.accounts?.data?.find(
-      (page) => page.instagram_business_account != null
+      (page) => page.instagram_business_account != null,
     )?.instagram_business_account;
 
     if (igAccount) {

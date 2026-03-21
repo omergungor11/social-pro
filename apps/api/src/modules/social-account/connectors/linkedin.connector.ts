@@ -1,10 +1,7 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import type {
   OAuthConnector,
+  OAuthCredentials,
   OAuthTokens,
   SocialProfile,
 } from "../interfaces/oauth-connector.interface";
@@ -16,9 +13,8 @@ import type {
  * endpoint (/v2/userinfo) is used for profile data — it requires the
  * `openid`, `profile`, and `email` scopes in addition to the marketing scopes.
  *
- * Required environment variables:
- *   LINKEDIN_CLIENT_ID
- *   LINKEDIN_CLIENT_SECRET
+ * Credentials are passed per-call from OAuthConfigService instead of being
+ * read from environment variables directly.
  */
 @Injectable()
 export class LinkedinConnector implements OAuthConnector {
@@ -27,8 +23,7 @@ export class LinkedinConnector implements OAuthConnector {
   private readonly tokenUrl =
     "https://www.linkedin.com/oauth/v2/accessToken";
   private readonly profileUrl = "https://api.linkedin.com/v2/userinfo";
-  private readonly revokeUrl =
-    "https://www.linkedin.com/oauth/v2/revoke";
+  private readonly revokeUrl = "https://www.linkedin.com/oauth/v2/revoke";
   private readonly scopes = [
     "openid",
     "profile",
@@ -38,37 +33,38 @@ export class LinkedinConnector implements OAuthConnector {
     "r_organization_social",
   ];
 
-  private get clientId(): string {
-    const id = process.env["LINKEDIN_CLIENT_ID"];
-    if (!id) throw new BadRequestException("LinkedIn connection is not configured. Please add LINKEDIN_CLIENT_ID to your environment.");
-    return id;
-  }
+  getAuthUrl(
+    state: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): string {
+    const effectiveScopes =
+      credentials.scopes && credentials.scopes.length > 0
+        ? credentials.scopes
+        : this.scopes;
 
-  private get clientSecret(): string {
-    const secret = process.env["LINKEDIN_CLIENT_SECRET"];
-    if (!secret) throw new BadRequestException("LinkedIn connection is not configured. Please add LINKEDIN_CLIENT_SECRET to your environment.");
-    return secret;
-  }
-
-  getAuthUrl(state: string, redirectUri: string): string {
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: this.clientId,
+      client_id: credentials.clientId,
       redirect_uri: redirectUri,
-      scope: this.scopes.join(" "),
+      scope: effectiveScopes.join(" "),
       state,
     });
 
     return `${this.authUrl}?${params.toString()}`;
   }
 
-  async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  async exchangeCode(
+    code: string,
+    redirectUri: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
     });
 
     const response = await fetch(this.tokenUrl, {
@@ -80,7 +76,7 @@ export class LinkedinConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `LinkedIn token exchange failed: ${errorText}`
+        `LinkedIn token exchange failed: ${errorText}`,
       );
     }
 
@@ -95,12 +91,15 @@ export class LinkedinConnector implements OAuthConnector {
     return this.mapTokenResponse(data);
   }
 
-  async refreshToken(refreshTokenValue: string): Promise<OAuthTokens> {
+  async refreshToken(
+    refreshTokenValue: string,
+    credentials: OAuthCredentials,
+  ): Promise<OAuthTokens> {
     const body = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshTokenValue,
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
     });
 
     const response = await fetch(this.tokenUrl, {
@@ -112,7 +111,7 @@ export class LinkedinConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `LinkedIn token refresh failed: ${errorText}`
+        `LinkedIn token refresh failed: ${errorText}`,
       );
     }
 
@@ -126,10 +125,13 @@ export class LinkedinConnector implements OAuthConnector {
     return this.mapTokenResponse(data);
   }
 
-  async revokeToken(accessToken: string): Promise<void> {
+  async revokeToken(
+    accessToken: string,
+    credentials: OAuthCredentials,
+  ): Promise<void> {
     const body = new URLSearchParams({
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
       token: accessToken,
     });
 
@@ -149,7 +151,7 @@ export class LinkedinConnector implements OAuthConnector {
     if (!response.ok) {
       const errorText = await response.text();
       throw new UnauthorizedException(
-        `LinkedIn profile fetch failed: ${errorText}`
+        `LinkedIn profile fetch failed: ${errorText}`,
       );
     }
 
@@ -165,7 +167,7 @@ export class LinkedinConnector implements OAuthConnector {
     const displayName =
       data.name ??
       ([data.given_name, data.family_name].filter(Boolean).join(" ") ||
-      undefined);
+        undefined);
 
     return {
       platformUserId: data.sub,

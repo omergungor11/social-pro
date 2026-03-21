@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { ExternalLink, AlertCircle } from 'lucide-react';
+import { ExternalLink, AlertCircle, Loader2, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogFooter } from '@/components/ui/dialog';
 import {
   PlatformIcon,
@@ -13,13 +14,24 @@ import {
 import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
-// Platform cards data
+// Types
 // ---------------------------------------------------------------------------
 
 interface PlatformCard {
   platform: Platform;
   description: string;
 }
+
+interface PlatformAvailability {
+  platform: string;
+  isAvailable: boolean;
+  isEnabled: boolean;
+  source: 'database' | 'env' | 'none';
+}
+
+// ---------------------------------------------------------------------------
+// Platform cards data
+// ---------------------------------------------------------------------------
 
 const PLATFORM_CARDS: PlatformCard[] = [
   {
@@ -69,6 +81,45 @@ export function ConnectDialog({
   const [connecting, setConnecting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Availability state
+  const [availability, setAvailability] = React.useState<
+    Map<string, PlatformAvailability>
+  >(new Map());
+  const [loading, setLoading] = React.useState(false);
+  const [availError, setAvailError] = React.useState<string | null>(null);
+
+  // Fetch availability whenever the dialog opens
+  React.useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setAvailError(null);
+    setAvailability(new Map());
+
+    async function fetchAvailability(): Promise<void> {
+      try {
+        const data = await apiClient.get<PlatformAvailability[]>(
+          '/social-accounts/platforms/available'
+        );
+        if (cancelled) return;
+        setAvailability(new Map(data.map((a) => [a.platform, a])));
+      } catch (err) {
+        if (cancelled) return;
+        const message =
+          err instanceof Error ? err.message : 'Failed to load platform availability.';
+        setAvailError(message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void fetchAvailability();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   function handleClose(): void {
     setSelected(null);
     setConnecting(false);
@@ -101,6 +152,23 @@ export function ConnectDialog({
     }
   }
 
+  // Derived: which platforms are available
+  const noPlatformsConfigured =
+    !loading &&
+    availError === null &&
+    availability.size > 0 &&
+    PLATFORM_CARDS.every(({ platform }) => {
+      const avail = availability.get(platform);
+      return avail === undefined || !avail.isAvailable || !avail.isEnabled;
+    });
+
+  function isPlatformAvailable(platform: Platform): boolean {
+    // While loading or on error we allow interaction (optimistic)
+    if (loading || availError !== null || availability.size === 0) return true;
+    const avail = availability.get(platform);
+    return avail !== undefined && avail.isAvailable && avail.isEnabled;
+  }
+
   return (
     <Dialog
       open={open}
@@ -109,14 +177,43 @@ export function ConnectDialog({
       description="Choose a platform to link via OAuth. You will be redirected to authorize Social Pro."
       maxWidth="max-w-xl"
     >
+      {/* Loading spinner */}
+      {loading && (
+        <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Checking platform availability...
+        </div>
+      )}
+
+      {/* Availability fetch error — non-blocking */}
+      {availError !== null && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {availError}
+        </div>
+      )}
+
+      {/* No platforms configured message */}
+      {noPlatformsConfigured && (
+        <div className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          <Settings className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+          <span>
+            No platforms configured. Ask your admin to set up OAuth apps in{' '}
+            <strong>Settings &rarr; OAuth App Configuration</strong>.
+          </span>
+        </div>
+      )}
+
       {/* Platform grid */}
       <div
         className="grid grid-cols-2 gap-3 sm:grid-cols-3"
         role="radiogroup"
         aria-label="Select platform to connect"
+        aria-busy={loading}
       >
         {PLATFORM_CARDS.map(({ platform, description }) => {
           const isSelected = selected === platform;
+          const available = isPlatformAvailable(platform);
 
           return (
             <button
@@ -124,13 +221,19 @@ export function ConnectDialog({
               type="button"
               role="radio"
               aria-checked={isSelected}
-              onClick={() => setSelected(platform)}
+              aria-disabled={!available}
+              onClick={() => {
+                if (available) setSelected(platform);
+              }}
+              disabled={!available}
               className={cn(
-                'group flex flex-col items-center gap-3 rounded-xl border-2 p-4 text-center',
+                'group relative flex flex-col items-center gap-3 rounded-xl border-2 p-4 text-center',
                 'transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                isSelected
-                  ? 'border-blue-600 bg-blue-50 shadow-md shadow-blue-100'
-                  : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+                available
+                  ? isSelected
+                    ? 'border-blue-600 bg-blue-50 shadow-md shadow-blue-100'
+                    : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+                  : 'cursor-not-allowed border-slate-100 bg-slate-50 opacity-60'
               )}
             >
               <PlatformIcon
@@ -138,7 +241,8 @@ export function ConnectDialog({
                 size="lg"
                 className={cn(
                   'transition-transform duration-150',
-                  !isSelected && 'group-hover:scale-105'
+                  available && !isSelected && 'group-hover:scale-105',
+                  !available && 'grayscale'
                 )}
               />
 
@@ -146,7 +250,8 @@ export function ConnectDialog({
                 <p
                   className={cn(
                     'text-sm font-semibold leading-tight',
-                    isSelected ? 'text-blue-700' : 'text-slate-800'
+                    isSelected ? 'text-blue-700' : 'text-slate-800',
+                    !available && 'text-slate-400'
                   )}
                 >
                   {getPlatformLabel(platform)}
@@ -155,6 +260,13 @@ export function ConnectDialog({
                   {description}
                 </p>
               </div>
+
+              {/* Not configured badge */}
+              {!available && (
+                <Badge variant="gray" className="text-[10px] px-1.5 py-0">
+                  Not configured
+                </Badge>
+              )}
 
               {/* Selected checkmark */}
               {isSelected && (
@@ -165,8 +277,8 @@ export function ConnectDialog({
         })}
       </div>
 
-      {/* Error message */}
-      {error && (
+      {/* Connect error message */}
+      {error !== null && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           <AlertCircle className="h-4 w-4 shrink-0" />
           {error}
@@ -179,12 +291,12 @@ export function ConnectDialog({
         </Button>
         <Button
           onClick={() => void handleConnect()}
-          disabled={selected === null || connecting}
+          disabled={selected === null || connecting || (selected !== null && !isPlatformAvailable(selected))}
           className="gap-1.5"
         >
           <ExternalLink className="h-4 w-4" aria-hidden="true" />
           {connecting
-            ? 'Connecting…'
+            ? 'Connecting...'
             : selected !== null
             ? `Connect ${getPlatformLabel(selected)}`
             : 'Select a Platform'}

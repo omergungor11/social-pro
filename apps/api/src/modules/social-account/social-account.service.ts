@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { EncryptionService } from "./services/encryption.service";
 import { PlatformRegistryService } from "./services/platform-registry.service";
+import { OAuthConfigService, PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
 
 export interface OAuthInitiation {
@@ -41,17 +42,18 @@ export class SocialAccountService {
   private readonly logger = new Logger(SocialAccountService.name);
 
   /**
-   * Redirect URI base is read from the APP_URL environment variable.
-   * Each platform callback route is appended at call time.
+   * API URL used to build platform OAuth callback URIs.
+   * Must match the redirect URI registered in each platform's developer console.
    */
-  private get appUrl(): string {
-    return process.env["APP_URL"] ?? "http://localhost:3000";
+  private get apiUrl(): string {
+    return process.env["API_URL"] ?? "http://localhost:4000";
   }
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
-    private readonly platformRegistry: PlatformRegistryService
+    private readonly platformRegistry: PlatformRegistryService,
+    private readonly oauthConfigService: OAuthConfigService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -64,7 +66,7 @@ export class SocialAccountService {
    */
   async listAccounts(
     agencyId: string,
-    query: ListAccountsQueryDto
+    query: ListAccountsQueryDto,
   ): Promise<SocialAccountPublic[]> {
     const accounts = await this.prisma.socialAccount.findMany({
       where: {
@@ -80,6 +82,18 @@ export class SocialAccountService {
   }
 
   // ---------------------------------------------------------------------------
+  // Platform availability
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns which platforms have credentials configured (DB or env vars).
+   * Used by the frontend to determine which connect buttons to show.
+   */
+  async getAvailablePlatforms(): Promise<PlatformAvailability[]> {
+    return this.oauthConfigService.getAvailablePlatforms();
+  }
+
+  // ---------------------------------------------------------------------------
   // OAuth initiation
   // ---------------------------------------------------------------------------
 
@@ -87,18 +101,33 @@ export class SocialAccountService {
    * Generates the OAuth authorization URL for a platform and returns it along
    * with the opaque state token. The state encodes the agencyId so the
    * callback handler can look up the owning agency without a session.
+   *
+   * Throws BadRequestException when no credentials are configured for the
+   * requested platform (neither in DB nor env vars).
    */
-  initiateOAuth(agencyId: string, platform: SocialPlatform): OAuthInitiation {
+  async initiateOAuth(
+    agencyId: string,
+    platform: SocialPlatform,
+  ): Promise<OAuthInitiation> {
+    const credentials = await this.oauthConfigService.getCredentials(platform);
+
+    if (!credentials) {
+      throw new BadRequestException(
+        `No OAuth credentials are configured for ${platform}. ` +
+          "Please add credentials via the admin OAuth config endpoint or set the corresponding environment variables.",
+      );
+    }
+
     const connector = this.platformRegistry.getConnector(platform);
 
     // State: base64url-encoded JSON containing agencyId + random nonce
     const nonce = randomBytes(16).toString("hex");
     const statePayload = Buffer.from(
-      JSON.stringify({ agencyId, nonce })
+      JSON.stringify({ agencyId, nonce }),
     ).toString("base64url");
 
     const redirectUri = this.buildRedirectUri(platform);
-    const authUrl = connector.getAuthUrl(statePayload, redirectUri);
+    const authUrl = connector.getAuthUrl(statePayload, redirectUri, credentials);
 
     return { authUrl, state: statePayload };
   }
@@ -111,24 +140,35 @@ export class SocialAccountService {
    * Handles the OAuth callback from the platform.
    *
    * Steps:
-   * 1. Decode the state to extract agencyId (and PKCE verifier for Twitter).
-   * 2. Exchange the authorization code for tokens.
-   * 3. Fetch the user profile.
-   * 4. Encrypt tokens.
-   * 5. Upsert the SocialAccount record.
+   * 1. Decode the state to extract agencyId.
+   * 2. Load platform credentials.
+   * 3. Exchange the authorization code for tokens.
+   * 4. Fetch the user profile.
+   * 5. Encrypt tokens.
+   * 6. Upsert the SocialAccount record.
    */
   async handleCallback(
     platform: SocialPlatform,
     code: string,
-    state: string
+    state: string,
   ): Promise<SocialAccountPublic> {
     const { agencyId } = this.decodeState(state);
+
+    const credentials = await this.oauthConfigService.getCredentials(platform);
+
+    if (!credentials) {
+      throw new BadRequestException(
+        `No OAuth credentials are configured for ${platform}. ` +
+          "Platform credentials may have been removed since the OAuth flow was initiated.",
+      );
+    }
+
     const connector = this.platformRegistry.getConnector(platform);
     const redirectUri = this.buildRedirectUri(platform);
 
     // For Twitter PKCE the state contains the verifier appended as :verifier
     // The connector handles extraction internally; pass full code through
-    const tokens = await connector.exchangeCode(code, redirectUri);
+    const tokens = await connector.exchangeCode(code, redirectUri, credentials);
     const profile = await connector.getUserProfile(tokens.accessToken);
 
     const encryptedAccessToken = this.encryption.encrypt(tokens.accessToken);
@@ -173,7 +213,7 @@ export class SocialAccountService {
     });
 
     this.logger.log(
-      `Social account connected: platform=${platform} agencyId=${agencyId} platformUserId=${profile.platformUserId}`
+      `Social account connected: platform=${platform} agencyId=${agencyId} platformUserId=${profile.platformUserId}`,
     );
 
     return this.stripTokens(account);
@@ -190,20 +230,30 @@ export class SocialAccountService {
     const account = await this.assertExists(agencyId, accountId);
 
     try {
-      const connector = this.platformRegistry.getConnector(account.platform);
-      const accessToken = this.encryption.decrypt(account.accessToken);
-      await connector.revokeToken(accessToken);
+      const credentials = await this.oauthConfigService.getCredentials(
+        account.platform,
+      );
+
+      if (credentials) {
+        const connector = this.platformRegistry.getConnector(account.platform);
+        const accessToken = this.encryption.decrypt(account.accessToken);
+        await connector.revokeToken(accessToken, credentials);
+      } else {
+        this.logger.warn(
+          `No credentials available for ${account.platform} — skipping token revocation for account ${accountId}`,
+        );
+      }
     } catch (err) {
       // Log but do not block deletion — token may already be invalid
       this.logger.warn(
-        `Token revocation failed for account ${accountId}: ${String(err)}`
+        `Token revocation failed for account ${accountId}: ${String(err)}`,
       );
     }
 
     await this.prisma.socialAccount.delete({ where: { id: accountId } });
 
     this.logger.log(
-      `Social account disconnected: id=${accountId} agencyId=${agencyId}`
+      `Social account disconnected: id=${accountId} agencyId=${agencyId}`,
     );
   }
 
@@ -226,7 +276,18 @@ export class SocialAccountService {
 
     if (!account.refreshToken) {
       throw new BadRequestException(
-        `Social account '${accountId}' does not have a refresh token`
+        `Social account '${accountId}' does not have a refresh token`,
+      );
+    }
+
+    const credentials = await this.oauthConfigService.getCredentials(
+      account.platform,
+    );
+
+    if (!credentials) {
+      throw new BadRequestException(
+        `No OAuth credentials are configured for ${account.platform}. ` +
+          "Cannot refresh token without platform credentials.",
       );
     }
 
@@ -234,7 +295,10 @@ export class SocialAccountService {
     const decryptedRefreshToken = this.encryption.decrypt(account.refreshToken);
 
     try {
-      const tokens = await connector.refreshToken(decryptedRefreshToken);
+      const tokens = await connector.refreshToken(
+        decryptedRefreshToken,
+        credentials,
+      );
 
       const encryptedAccessToken = this.encryption.encrypt(tokens.accessToken);
       const encryptedRefreshToken = tokens.refreshToken
@@ -263,10 +327,10 @@ export class SocialAccountService {
       });
 
       this.logger.error(
-        `Token refresh failed for account ${accountId}: ${String(err)}`
+        `Token refresh failed for account ${accountId}: ${String(err)}`,
       );
       throw new UnauthorizedException(
-        `Token refresh failed for account '${accountId}'. Please reconnect this account.`
+        `Token refresh failed for account '${accountId}'. Please reconnect this account.`,
       );
     }
   }
@@ -377,7 +441,7 @@ export class SocialAccountService {
   }
 
   private buildRedirectUri(platform: SocialPlatform): string {
-    return `${this.appUrl}/social-accounts/oauth/${platform.toLowerCase()}/callback`;
+    return `${this.apiUrl}/api/v1/social-accounts/oauth/${platform.toLowerCase()}/callback`;
   }
 
   private decodeState(state: string): { agencyId: string; nonce: string } {
@@ -395,14 +459,14 @@ export class SocialAccountService {
       return { agencyId: parsed.agencyId, nonce: parsed.nonce ?? "" };
     } catch {
       throw new BadRequestException(
-        "Invalid OAuth state parameter — possible CSRF attack"
+        "Invalid OAuth state parameter — possible CSRF attack",
       );
     }
   }
 
   private async assertExists(
     agencyId: string,
-    accountId: string
+    accountId: string,
   ): Promise<SocialAccount> {
     const account = await this.prisma.socialAccount.findFirst({
       where: { id: accountId, agencyId },
@@ -410,7 +474,7 @@ export class SocialAccountService {
 
     if (!account) {
       throw new NotFoundException(
-        `Social account '${accountId}' not found in this agency`
+        `Social account '${accountId}' not found in this agency`,
       );
     }
 

@@ -28,6 +28,7 @@ import {
   OAuthInitiation,
   SocialAccountPublic,
 } from "./social-account.service";
+import { PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
 
 @ApiTags("Social Accounts")
@@ -53,9 +54,30 @@ export class SocialAccountController {
   @ApiResponse({ status: 401, description: "Unauthenticated" })
   async list(
     @CurrentAgency() agencyId: string,
-    @Query() query: ListAccountsQueryDto
+    @Query() query: ListAccountsQueryDto,
   ): Promise<SocialAccountPublic[]> {
     return this.socialAccountService.listAccounts(agencyId, query);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Platform availability
+  // ---------------------------------------------------------------------------
+
+  @Get("platforms/available")
+  @ApiOperation({
+    summary: "List available social platforms",
+    description:
+      "Returns which platforms have OAuth credentials configured " +
+      "(either via database or environment variables). " +
+      "Use this to determine which connect buttons to enable in the UI.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Platform availability list",
+  })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  async getAvailablePlatforms(): Promise<PlatformAvailability[]> {
+    return this.socialAccountService.getAvailablePlatforms();
   }
 
   // ---------------------------------------------------------------------------
@@ -76,12 +98,15 @@ export class SocialAccountController {
     description: "Target social platform",
   })
   @ApiResponse({ status: 200, description: "Auth URL generated" })
-  @ApiResponse({ status: 400, description: "Unsupported platform" })
+  @ApiResponse({
+    status: 400,
+    description: "Unsupported platform or credentials not configured",
+  })
   @ApiResponse({ status: 401, description: "Unauthenticated" })
-  getOAuthUrl(
+  async getOAuthUrl(
     @CurrentAgency() agencyId: string,
-    @Param("platform") platform: string
-  ): OAuthInitiation {
+    @Param("platform") platform: string,
+  ): Promise<OAuthInitiation> {
     const socialPlatform = this.parsePlatform(platform);
     return this.socialAccountService.initiateOAuth(agencyId, socialPlatform);
   }
@@ -108,12 +133,15 @@ export class SocialAccountController {
   })
   @ApiQuery({ name: "code", description: "Authorization code from platform" })
   @ApiQuery({ name: "state", description: "State token for CSRF protection" })
-  @ApiResponse({ status: 302, description: "Redirect to frontend after processing" })
+  @ApiResponse({
+    status: 302,
+    description: "Redirect to frontend after processing",
+  })
   async handleCallback(
     @Param("platform") platform: string,
     @Query("code") code: string,
     @Query("state") state: string,
-    @Query("error") error?: string
+    @Query("error") error?: string,
   ): Promise<{ url: string }> {
     const frontendUrl =
       process.env["FRONTEND_URL"] ?? "http://localhost:3000";
@@ -129,7 +157,7 @@ export class SocialAccountController {
       const account = await this.socialAccountService.handleCallback(
         socialPlatform,
         code,
-        state
+        state,
       );
 
       return {
@@ -162,7 +190,7 @@ export class SocialAccountController {
   @ApiResponse({ status: 404, description: "Social account not found" })
   async disconnect(
     @CurrentAgency() agencyId: string,
-    @Param("id") accountId: string
+    @Param("id") accountId: string,
   ): Promise<void> {
     return this.socialAccountService.disconnect(agencyId, accountId);
   }
@@ -183,10 +211,13 @@ export class SocialAccountController {
   @ApiParam({ name: "id", description: "Social account ID" })
   @ApiResponse({ status: 200, description: "Token refreshed successfully" })
   @ApiResponse({ status: 400, description: "Account has no refresh token" })
-  @ApiResponse({ status: 401, description: "Token refresh failed or unauthenticated" })
+  @ApiResponse({
+    status: 401,
+    description: "Token refresh failed or unauthenticated",
+  })
   @ApiResponse({ status: 404, description: "Social account not found" })
   async refreshToken(
-    @Param("id") accountId: string
+    @Param("id") accountId: string,
   ): Promise<SocialAccountPublic> {
     return this.socialAccountService.refreshAccountToken(accountId);
   }
@@ -207,7 +238,7 @@ export class SocialAccountController {
   @ApiResponse({ status: 401, description: "Unauthenticated" })
   @ApiResponse({ status: 404, description: "Social account not found" })
   async checkStatus(
-    @Param("id") accountId: string
+    @Param("id") accountId: string,
   ): Promise<AccountHealthStatus> {
     return this.socialAccountService.checkHealth(accountId);
   }
