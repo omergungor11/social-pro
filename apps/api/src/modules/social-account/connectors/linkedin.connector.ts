@@ -34,7 +34,8 @@ export class LinkedinConnector implements OAuthConnector {
     "profile",
     "email",
     "w_member_social",
-    "r_liteprofile",
+    "w_organization_social",
+    "r_organization_social",
   ];
 
   private get clientId(): string {

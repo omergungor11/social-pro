@@ -21,7 +21,7 @@ import type {
  */
 @Injectable()
 export class FacebookConnector implements OAuthConnector {
-  private readonly apiVersion = "v19.0";
+  private readonly apiVersion = "v22.0";
   private readonly authUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth`;
   private readonly tokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token`;
   private readonly longLivedTokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token`;
@@ -31,6 +31,9 @@ export class FacebookConnector implements OAuthConnector {
     "pages_show_list",
     "pages_read_engagement",
     "pages_manage_posts",
+    "pages_manage_metadata",
+    "pages_read_user_content",
+    "read_insights",
   ];
 
   private get clientId(): string {

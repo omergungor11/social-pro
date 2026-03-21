@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogFooter } from '@/components/ui/dialog';
@@ -10,6 +10,7 @@ import {
   getPlatformLabel,
   type Platform,
 } from '@/components/social/platform-icon';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Platform cards data
@@ -66,10 +67,12 @@ export function ConnectDialog({
 }: ConnectDialogProps): React.JSX.Element {
   const [selected, setSelected] = React.useState<Platform | null>(null);
   const [connecting, setConnecting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   function handleClose(): void {
     setSelected(null);
     setConnecting(false);
+    setError(null);
     onClose();
   }
 
@@ -77,14 +80,25 @@ export function ConnectDialog({
     if (selected === null) return;
 
     setConnecting(true);
+    setError(null);
 
-    // In production this would redirect to the platform's OAuth URL.
-    // For now we log the intent and simulate a short delay.
-    console.log(`[ConnectDialog] Initiating OAuth for platform: ${selected}`);
-    await new Promise<void>((resolve) => setTimeout(resolve, 800));
+    try {
+      // Call backend to get OAuth authorization URL
+      const result = await apiClient.get<{ authUrl: string; state: string }>(
+        `/api/v1/social-accounts/oauth/${selected}/url`
+      );
 
-    setConnecting(false);
-    handleClose();
+      // Store state in sessionStorage for CSRF verification
+      sessionStorage.setItem('oauth_state', result.state);
+      sessionStorage.setItem('oauth_platform', selected);
+
+      // Redirect to platform's OAuth page
+      window.location.href = result.authUrl;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to initiate OAuth';
+      setError(message);
+      setConnecting(false);
+    }
   }
 
   return (
@@ -150,6 +164,14 @@ export function ConnectDialog({
           );
         })}
       </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
 
       <DialogFooter className="mt-5">
         <Button variant="outline" onClick={handleClose} disabled={connecting}>

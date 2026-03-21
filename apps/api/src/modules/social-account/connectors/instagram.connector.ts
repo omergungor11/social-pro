@@ -22,13 +22,14 @@ import type {
  */
 @Injectable()
 export class InstagramConnector implements OAuthConnector {
-  private readonly apiVersion = "v19.0";
+  private readonly apiVersion = "v22.0";
   private readonly authUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth`;
   private readonly tokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token`;
   private readonly scopes = [
     "instagram_basic",
     "instagram_content_publish",
     "instagram_manage_insights",
+    "instagram_manage_comments",
     "pages_show_list",
     "pages_read_engagement",
   ];

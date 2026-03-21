@@ -12,6 +12,7 @@ import {
   PLATFORM_ACCENT,
   type Platform,
 } from '@/components/social/platform-icon';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -171,14 +172,24 @@ export function AccountCard({
 
   async function handleRefresh(): Promise<void> {
     setRefreshing(true);
-    await new Promise<void>((resolve) => setTimeout(resolve, 1200));
-    onRefresh(account.id);
-    setRefreshing(false);
+    try {
+      await apiClient.post(`/api/v1/social-accounts/${account.id}/refresh`);
+      onRefresh(account.id);
+    } catch (err) {
+      console.error('Token refresh failed:', err);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
-  function handleDisconnectConfirm(): void {
+  async function handleDisconnectConfirm(): Promise<void> {
     setConfirmOpen(false);
-    onDisconnect(account.id);
+    try {
+      await apiClient.delete(`/api/v1/social-accounts/${account.id}`);
+      onDisconnect(account.id);
+    } catch (err) {
+      console.error('Disconnect failed:', err);
+    }
   }
 
   const accentBorder = PLATFORM_ACCENT[account.platform];

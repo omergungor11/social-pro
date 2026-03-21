@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
-import { Plus, Share2, BarChart3, TrendingUp } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Plus, Share2, BarChart3, TrendingUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,189 +10,7 @@ import { AccountCard } from '@/components/social/account-card';
 import { ConnectDialog } from '@/components/social/connect-dialog';
 import type { SocialAccount } from '@/components/social/account-card';
 import type { Platform } from '@/components/social/platform-icon';
-
-// ---------------------------------------------------------------------------
-// Mock data with metrics
-// ---------------------------------------------------------------------------
-
-const MOCK_ACCOUNTS: SocialAccount[] = [
-  {
-    id: 'sa1',
-    platform: 'twitter',
-    username: 'acmecorp',
-    displayName: 'Acme Corporation',
-    status: 'active',
-    connectedAt: '2024-01-20',
-    assignedClient: 'Acme Corporation',
-    metrics: {
-      followers: 45200,
-      followersChange: 1280,
-      posts: 342,
-      likes: 18400,
-      comments: 3200,
-      impressions: 892000,
-      engagementRate: 4.8,
-      weeklyData: [120, 145, 132, 178, 156, 190, 210],
-    },
-    recentPosts: [
-      { id: 'p1', title: 'New product launch announcement 🚀', status: 'published', date: '2026-03-20', likes: 234, comments: 45 },
-      { id: 'p2', title: 'Behind the scenes at our office', status: 'published', date: '2026-03-18', likes: 189, comments: 32 },
-      { id: 'p3', title: 'Weekly tips: Social media strategy', status: 'scheduled', date: '2026-03-22', likes: 0, comments: 0 },
-    ],
-  },
-  {
-    id: 'sa2',
-    platform: 'instagram',
-    username: 'acmecorp.official',
-    displayName: 'Acme Corp Official',
-    status: 'active',
-    connectedAt: '2024-01-20',
-    assignedClient: 'Acme Corporation',
-    metrics: {
-      followers: 128500,
-      followersChange: 3450,
-      posts: 567,
-      likes: 45600,
-      comments: 8900,
-      impressions: 2340000,
-      engagementRate: 6.2,
-      weeklyData: [340, 380, 356, 412, 445, 398, 478],
-    },
-    recentPosts: [
-      { id: 'p4', title: 'Summer collection preview', status: 'published', date: '2026-03-19', likes: 1245, comments: 89 },
-      { id: 'p5', title: 'Customer spotlight: Maria J.', status: 'published', date: '2026-03-17', likes: 876, comments: 67 },
-    ],
-  },
-  {
-    id: 'sa3',
-    platform: 'facebook',
-    username: 'BrightIdeasStudio',
-    displayName: 'Bright Ideas Studio',
-    status: 'expiring',
-    connectedAt: '2024-02-10',
-    expiresAt: '2026-03-25',
-    assignedClient: 'Bright Ideas Studio',
-    metrics: {
-      followers: 23400,
-      followersChange: -120,
-      posts: 189,
-      likes: 5600,
-      comments: 1200,
-      impressions: 456000,
-      engagementRate: 2.9,
-      weeklyData: [89, 76, 82, 71, 68, 74, 65],
-    },
-    recentPosts: [
-      { id: 'p6', title: 'Design thinking workshop recap', status: 'published', date: '2026-03-16', likes: 78, comments: 12 },
-    ],
-  },
-  {
-    id: 'sa4',
-    platform: 'linkedin',
-    username: 'cloudsyncsystems',
-    displayName: 'CloudSync Systems',
-    status: 'active',
-    connectedAt: '2024-02-22',
-    assignedClient: 'CloudSync Systems',
-    metrics: {
-      followers: 12800,
-      followersChange: 890,
-      posts: 98,
-      likes: 3400,
-      comments: 670,
-      impressions: 234000,
-      engagementRate: 5.1,
-      weeklyData: [45, 52, 48, 67, 72, 58, 81],
-    },
-    recentPosts: [
-      { id: 'p7', title: 'We\'re hiring! Senior engineers wanted', status: 'published', date: '2026-03-20', likes: 345, comments: 56 },
-      { id: 'p8', title: 'Cloud migration best practices', status: 'published', date: '2026-03-15', likes: 234, comments: 34 },
-    ],
-  },
-  {
-    id: 'sa5',
-    platform: 'tiktok',
-    username: 'deltahealth',
-    displayName: 'Delta Health Partners',
-    status: 'disconnected',
-    connectedAt: '2024-03-08',
-    assignedClient: 'Delta Health Partners',
-    metrics: {
-      followers: 67800,
-      followersChange: 0,
-      posts: 234,
-      likes: 89000,
-      comments: 12300,
-      impressions: 4560000,
-      engagementRate: 8.4,
-      weeklyData: [0, 0, 0, 0, 0, 0, 0],
-    },
-  },
-  {
-    id: 'sa6',
-    platform: 'youtube',
-    username: 'EchoCommerceOfficial',
-    displayName: 'Echo Commerce',
-    status: 'active',
-    connectedAt: '2024-03-25',
-    assignedClient: 'Echo Commerce',
-    metrics: {
-      followers: 8900,
-      followersChange: 420,
-      posts: 67,
-      likes: 12300,
-      comments: 2100,
-      impressions: 890000,
-      engagementRate: 7.2,
-      weeklyData: [234, 256, 278, 312, 298, 345, 367],
-    },
-    recentPosts: [
-      { id: 'p9', title: 'E-commerce trends 2026', status: 'published', date: '2026-03-18', likes: 456, comments: 78 },
-      { id: 'p10', title: 'How to increase conversions', status: 'scheduled', date: '2026-03-23', likes: 0, comments: 0 },
-    ],
-  },
-  {
-    id: 'sa7',
-    platform: 'twitter',
-    username: 'founderslaunchpad',
-    displayName: 'Founders Launchpad',
-    status: 'active',
-    connectedAt: '2024-04-14',
-    assignedClient: 'Founders Launchpad',
-    metrics: {
-      followers: 19600,
-      followersChange: 560,
-      posts: 456,
-      likes: 8900,
-      comments: 1890,
-      impressions: 567000,
-      engagementRate: 3.7,
-      weeklyData: [67, 78, 89, 92, 85, 98, 112],
-    },
-  },
-  {
-    id: 'sa8',
-    platform: 'instagram',
-    username: 'greenleaf_organics',
-    displayName: 'Greenleaf Organics',
-    status: 'expiring',
-    connectedAt: '2024-04-28',
-    expiresAt: '2026-03-30',
-    metrics: {
-      followers: 34500,
-      followersChange: 780,
-      posts: 234,
-      likes: 23400,
-      comments: 4500,
-      impressions: 1230000,
-      engagementRate: 5.8,
-      weeklyData: [189, 201, 178, 223, 245, 212, 256],
-    },
-    recentPosts: [
-      { id: 'p11', title: 'Farm to table: Spring harvest', status: 'published', date: '2026-03-19', likes: 678, comments: 89 },
-    ],
-  },
-];
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Filter / Summary helpers
@@ -315,11 +133,112 @@ function EmptyState({ filtered, onConnect }: { filtered: boolean; onConnect: () 
 // Page
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Map API response to frontend SocialAccount shape
+// ---------------------------------------------------------------------------
+
+interface ApiSocialAccount {
+  id: string;
+  platform: string;
+  platformUsername: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
+  connectedAt: string;
+  tokenExpiresAt: string | null;
+  scopes: string[];
+  metadata: Record<string, unknown>;
+  clientId: string | null;
+}
+
+function mapApiAccount(a: ApiSocialAccount): SocialAccount {
+  const now = Date.now();
+  const expiresAt = a.tokenExpiresAt ? new Date(a.tokenExpiresAt).getTime() : null;
+  const isExpiring = expiresAt !== null && expiresAt - now < 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  let status: 'active' | 'expiring' | 'disconnected' = 'active';
+  if (!a.isActive) status = 'disconnected';
+  else if (isExpiring) status = 'expiring';
+
+  return {
+    id: a.id,
+    platform: a.platform.toLowerCase() as Platform,
+    username: a.platformUsername ?? a.displayName ?? 'Unknown',
+    displayName: a.displayName ?? a.platformUsername ?? 'Unknown',
+    avatarUrl: a.avatarUrl ?? undefined,
+    status,
+    connectedAt: a.connectedAt,
+    expiresAt: a.tokenExpiresAt ?? undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Toast notification
+// ---------------------------------------------------------------------------
+
+function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }): React.JSX.Element {
+  React.useEffect(() => {
+    const timer = setTimeout(onClose, 5000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div className={cn(
+      'fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg transition-all',
+      type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'
+    )}>
+      {type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+      {message}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function SocialAccountsPage(): React.JSX.Element {
   const router = useRouter();
-  const [accounts, setAccounts] = React.useState<SocialAccount[]>(MOCK_ACCOUNTS);
+  const searchParams = useSearchParams();
+  const [accounts, setAccounts] = React.useState<SocialAccount[]>([]);
+  const [loading, setLoading] = React.useState(true);
   const [activeFilter, setActiveFilter] = React.useState<FilterValue>('all');
   const [connectOpen, setConnectOpen] = React.useState(false);
+  const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Fetch accounts from API
+  const fetchAccounts = React.useCallback(async () => {
+    try {
+      const data = await apiClient.get<ApiSocialAccount[]>('/api/v1/social-accounts');
+      setAccounts(data.map(mapApiAccount));
+    } catch (err) {
+      console.error('Failed to fetch accounts:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchAccounts();
+  }, [fetchAccounts]);
+
+  // Handle OAuth callback query params
+  React.useEffect(() => {
+    const connected = searchParams.get('connected');
+    const platform = searchParams.get('platform');
+    const error = searchParams.get('error');
+
+    if (connected && platform) {
+      setToast({ message: `${platform.charAt(0).toUpperCase() + platform.slice(1)} account connected successfully!`, type: 'success' });
+      // Clean up URL params
+      router.replace('/dashboard/social-accounts', { scroll: false });
+      // Refetch to get new account
+      void fetchAccounts();
+    } else if (error) {
+      setToast({ message: `Connection failed: ${error}`, type: 'error' });
+      router.replace('/dashboard/social-accounts', { scroll: false });
+    }
+  }, [searchParams, router, fetchAccounts]);
 
   const filtered = React.useMemo(() => {
     if (activeFilter === 'all') return accounts;
@@ -328,21 +247,24 @@ export default function SocialAccountsPage(): React.JSX.Element {
 
   function handleRefresh(id: string): void {
     setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, status: 'active' as const } : a)));
+    setToast({ message: 'Token refreshed successfully', type: 'success' });
   }
 
   function handleDisconnect(id: string): void {
     setAccounts((prev) => prev.filter((a) => a.id !== id));
+    setToast({ message: 'Account disconnected', type: 'success' });
   }
 
   return (
     <>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Social Accounts</h1>
             <p className="mt-0.5 text-sm text-slate-500">
-              {accounts.length} account{accounts.length !== 1 ? 's' : ''} connected across {new Set(accounts.map((a) => a.platform)).size} platforms
+              {loading ? 'Loading accounts...' : `${accounts.length} account${accounts.length !== 1 ? 's' : ''} connected across ${new Set(accounts.map((a) => a.platform)).size} platforms`}
             </p>
           </div>
           <Button className="gap-1.5" onClick={() => setConnectOpen(true)}>
@@ -387,7 +309,11 @@ export default function SocialAccountsPage(): React.JSX.Element {
         </div>
 
         {/* Accounts grid */}
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState filtered={activeFilter !== 'all'} onConnect={() => setConnectOpen(true)} />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

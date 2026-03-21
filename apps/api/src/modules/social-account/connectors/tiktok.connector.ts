@@ -31,7 +31,9 @@ export class TiktokConnector implements OAuthConnector {
   private readonly scopes = [
     "user.info.basic",
     "user.info.profile",
+    "user.info.stats",
     "video.list",
+    "video.upload",
     "video.publish",
   ];
 

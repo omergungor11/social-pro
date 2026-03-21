@@ -116,11 +116,11 @@ export class SocialAccountController {
     @Query("error") error?: string
   ): Promise<{ url: string }> {
     const frontendUrl =
-      process.env["FRONTEND_URL"] ?? "http://localhost:3001";
+      process.env["FRONTEND_URL"] ?? "http://localhost:3000";
 
     if (error) {
       return {
-        url: `${frontendUrl}/settings/social-accounts?error=${encodeURIComponent(error)}`,
+        url: `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent(error)}`,
       };
     }
 
@@ -133,13 +133,13 @@ export class SocialAccountController {
       );
 
       return {
-        url: `${frontendUrl}/settings/social-accounts?connected=${account.id}&platform=${platform}`,
+        url: `${frontendUrl}/dashboard/social-accounts?connected=${account.id}&platform=${platform}`,
       };
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "OAuth callback failed";
       return {
-        url: `${frontendUrl}/settings/social-accounts?error=${encodeURIComponent(message)}`,
+        url: `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent(message)}`,
       };
     }
   }

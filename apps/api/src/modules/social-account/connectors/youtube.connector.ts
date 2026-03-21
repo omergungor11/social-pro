@@ -28,9 +28,10 @@ export class YoutubeConnector implements OAuthConnector {
   private readonly profileUrl =
     "https://www.googleapis.com/youtube/v3/channels";
   private readonly scopes = [
-    "https://www.googleapis.com/auth/youtube",
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
     "https://www.googleapis.com/auth/userinfo.profile",
   ];
 
