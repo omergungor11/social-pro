@@ -15,10 +15,12 @@ import { BillingModule } from "./modules/billing/billing.module";
 import { NotificationModule } from "./modules/notification/notification.module";
 import { AuditModule } from "./modules/audit/audit.module";
 import { WebhookModule } from "./modules/webhook/webhook.module";
+import { RateLimitModule } from "./modules/common/rate-limit/rate-limit.module";
 
 @Module({
   imports: [
     PrismaModule,
+    RateLimitModule,
     AuthModule,
     TenantModule,
     TeamModule,

@@ -1,10 +1,6 @@
-import { redirect } from "next/navigation";
-
 /**
- * Root route — immediately redirects to the login page.
- * Once session management is in place, this should check for a valid
- * session cookie and redirect to /dashboard when authenticated.
+ * Root route — superseded by the (marketing) route group's page.tsx.
+ * This file intentionally does nothing; the (marketing)/page.tsx handles /.
+ * @deprecated — remove this file if Next.js raises a duplicate-route error.
  */
-export default function RootPage(): never {
-  redirect("/login");
-}
+export { default } from "@/app/(marketing)/page";
