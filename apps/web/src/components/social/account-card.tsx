@@ -173,7 +173,7 @@ export function AccountCard({
   async function handleRefresh(): Promise<void> {
     setRefreshing(true);
     try {
-      await apiClient.post(`/api/v1/social-accounts/${account.id}/refresh`);
+      await apiClient.post(`/social-accounts/${account.id}/refresh`);
       onRefresh(account.id);
     } catch (err) {
       console.error('Token refresh failed:', err);
@@ -185,7 +185,7 @@ export function AccountCard({
   async function handleDisconnectConfirm(): Promise<void> {
     setConfirmOpen(false);
     try {
-      await apiClient.delete(`/api/v1/social-accounts/${account.id}`);
+      await apiClient.delete(`/social-accounts/${account.id}`);
       onDisconnect(account.id);
     } catch (err) {
       console.error('Disconnect failed:', err);

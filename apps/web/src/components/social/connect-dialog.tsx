@@ -85,7 +85,7 @@ export function ConnectDialog({
     try {
       // Call backend to get OAuth authorization URL
       const result = await apiClient.get<{ authUrl: string; state: string }>(
-        `/api/v1/social-accounts/oauth/${selected}/url`
+        `/social-accounts/oauth/${selected}/url`
       );
 
       // Store state in sessionStorage for CSRF verification

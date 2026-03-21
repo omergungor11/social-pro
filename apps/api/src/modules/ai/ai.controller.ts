@@ -25,6 +25,7 @@ import { PaginationQueryDto } from "../common/dto/pagination.dto";
 import { AiService } from "./ai.service";
 import { ContentTemplateService } from "./content-template.service";
 import { GenerateContentDto } from "./dto/generate-content.dto";
+import { GenerateImageDto } from "./dto/generate-image.dto";
 import { CreateTemplateDto } from "./dto/create-template.dto";
 import { UpdateTemplateDto } from "./dto/update-template.dto";
 
@@ -61,6 +62,34 @@ export class AiController {
     @Body() dto: GenerateContentDto
   ) {
     return this.aiService.generate(agencyId, user.id, dto);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Generate image
+  // ---------------------------------------------------------------------------
+
+  @Post("generate-image")
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: "Generate an image with Gemini",
+    description:
+      "Calls Google Gemini (gemini-2.0-flash-exp) to generate an image from a text prompt. " +
+      "Returns the image as a base64-encoded string alongside an AiGeneration record. " +
+      "The base64 payload is not persisted; only metadata is stored in the database.",
+  })
+  @ApiResponse({
+    status: 201,
+    description: "Image generated successfully. Response includes imageBase64 and mimeType.",
+  })
+  @ApiResponse({ status: 400, description: "Validation error" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  @ApiResponse({ status: 500, description: "Gemini provider error or safety filter block" })
+  async generateImage(
+    @CurrentAgency() agencyId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GenerateImageDto
+  ) {
+    return this.aiService.generateImage(agencyId, user.id, dto);
   }
 
   // ---------------------------------------------------------------------------

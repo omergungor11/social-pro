@@ -9,8 +9,10 @@ import { PrismaService } from "../common/prisma/prisma.service";
 import { PaginatedResponseDto, PaginationQueryDto } from "../common/dto/pagination.dto";
 import { ClaudeProviderService } from "./services/claude-provider.service";
 import { OpenAiProviderService } from "./services/openai-provider.service";
+import { GeminiImageProviderService } from "./services/gemini-image-provider.service";
 import { ContentTemplateService } from "./content-template.service";
 import { GenerateContentDto } from "./dto/generate-content.dto";
+import { GenerateImageDto } from "./dto/generate-image.dto";
 import { AiGenerateOptions } from "./services/ai-provider.interface";
 
 // ---------------------------------------------------------------------------
@@ -20,6 +22,12 @@ import { AiGenerateOptions } from "./services/ai-provider.interface";
 export interface GenerateResult {
   generation: AiGeneration;
   text: string;
+}
+
+export interface GenerateImageResult {
+  generation: AiGeneration;
+  imageBase64: string;
+  mimeType: string;
 }
 
 export interface UsageStats {
@@ -46,6 +54,7 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly claude: ClaudeProviderService,
     private readonly openai: OpenAiProviderService,
+    private readonly geminiImage: GeminiImageProviderService,
     private readonly templateService: ContentTemplateService
   ) {}
 
@@ -198,6 +207,74 @@ export class AiService {
       generationsLimit,
       tokensUsed: tokenResult._sum.tokensUsed ?? 0,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Generate image
+  // ---------------------------------------------------------------------------
+
+  async generateImage(
+    agencyId: string,
+    userId: string,
+    dto: GenerateImageDto
+  ): Promise<GenerateImageResult> {
+    // Create a PENDING record so the generation is tracked before the API call
+    const record = await this.prisma.aiGeneration.create({
+      data: {
+        agencyId,
+        userId,
+        prompt: dto.prompt,
+        model: AiModel.GEMINI,
+        status: AiGenerationStatus.PENDING,
+      },
+    });
+
+    try {
+      const result = await this.geminiImage.generateImage(dto.prompt, {
+        aspectRatio: dto.aspectRatio,
+        style: dto.style,
+        platform: dto.platform,
+      });
+
+      // Store metadata only — base64 payload is not persisted to avoid bloating the DB
+      const updated = await this.prisma.aiGeneration.update({
+        where: { id: record.id },
+        data: {
+          model: AiModel.GEMINI,
+          tokensUsed: 0,
+          costCents: 0,
+          result: {
+            mimeType: result.mimeType,
+            model: result.model,
+            promptUsed: result.prompt,
+          },
+          status: AiGenerationStatus.COMPLETED,
+        },
+      });
+
+      this.logger.log(
+        `Gemini image generation completed: id=${record.id} agencyId=${agencyId} mimeType=${result.mimeType}`
+      );
+
+      return {
+        generation: updated,
+        imageBase64: result.imageBase64,
+        mimeType: result.mimeType,
+      };
+    } catch (err) {
+      await this.prisma.aiGeneration.update({
+        where: { id: record.id },
+        data: { status: AiGenerationStatus.FAILED },
+      });
+
+      this.logger.error(
+        `Gemini image generation failed: id=${record.id} agencyId=${agencyId} error=${String(err)}`
+      );
+
+      throw new InternalServerErrorException(
+        "Image generation failed. Please try again later."
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------

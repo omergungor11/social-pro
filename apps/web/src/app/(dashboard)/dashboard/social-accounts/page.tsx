@@ -209,7 +209,7 @@ export default function SocialAccountsPage(): React.JSX.Element {
   // Fetch accounts from API
   const fetchAccounts = React.useCallback(async () => {
     try {
-      const data = await apiClient.get<ApiSocialAccount[]>('/api/v1/social-accounts');
+      const data = await apiClient.get<ApiSocialAccount[]>('/social-accounts');
       setAccounts(data.map(mapApiAccount));
     } catch (err) {
       console.error('Failed to fetch accounts:', err);

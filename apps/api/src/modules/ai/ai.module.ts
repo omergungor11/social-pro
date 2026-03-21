@@ -4,6 +4,7 @@ import { AiController } from "./ai.controller";
 import { AiService } from "./ai.service";
 import { ClaudeProviderService } from "./services/claude-provider.service";
 import { OpenAiProviderService } from "./services/openai-provider.service";
+import { GeminiImageProviderService } from "./services/gemini-image-provider.service";
 import { ContentTemplateService } from "./content-template.service";
 
 /**
@@ -14,10 +15,12 @@ import { ContentTemplateService } from "./content-template.service";
  *  - ContentTemplateService: CRUD for ContentTemplate with seeded system templates
  *  - ClaudeProviderService: primary Anthropic Claude provider
  *  - OpenAiProviderService: fallback OpenAI GPT-4o provider
+ *  - GeminiImageProviderService: Google Gemini image generation provider
  *
  * Environment variables required:
- *  - ANTHROPIC_API_KEY — Anthropic API key
- *  - OPENAI_API_KEY    — OpenAI API key
+ *  - ANTHROPIC_API_KEY  — Anthropic API key
+ *  - OPENAI_API_KEY     — OpenAI API key
+ *  - GOOGLE_AI_API_KEY  — Google AI Studio API key (Gemini)
  */
 @Module({
   imports: [PrismaModule],
@@ -27,6 +30,7 @@ import { ContentTemplateService } from "./content-template.service";
     ContentTemplateService,
     ClaudeProviderService,
     OpenAiProviderService,
+    GeminiImageProviderService,
   ],
   exports: [AiService, ContentTemplateService],
 })
