@@ -1,5 +1,42 @@
 # Session Notes
 
+## 2026-03-22 — Session 4
+
+### Completed
+- [x] Phase 10 tamamlandi (8/8 task): rate limiting, Swagger, unit tests (87), E2E tests (162), Docker prod, CI/CD (9 workflow), env config, landing page + onboarding
+- [x] OAuth connector'lar guncellendi: Facebook/IG v19→v22, LinkedIn deprecated scope fix, TikTok/YouTube scope ekleme
+- [x] Frontend social accounts API entegrasyonu: mock data → gercek API (connect, refresh, disconnect, callback handling)
+- [x] AI gorsel uretim: Google Gemini (Nano Banana) provider + frontend Image Generator sekmesi
+- [x] Centralized OAuth config sistemi: PlatformOAuthConfig DB tablosu, admin settings sayfasi, credential fallback (DB→env→none), ConnectDialog platform availability
+- [x] Login hata mesajlari iyilestirildi: yanlis email / yanlis sifre / uyelik yok ayri mesajlar
+- [x] Dialog overflow fix: max-h-[90vh] + scrollable body
+- [x] 401 auto-redirect: token expired → login sayfasina yonlendirme (error flash olmadan)
+- [x] Dev auto-login fix: stale token temizleme
+- [x] API port 4000→6000 tasindi
+
+### Yarim Kalan Isler
+- [ ] Sayfalar hala cogunlukla mock data kullaniyor (clients, posts, analytics, billing)
+- [ ] OpenAI/Stripe/OAuth API key'leri henuz gercek degil
+- [ ] Prisma seed data eksik (ornek musteriler, hesaplar, postlar)
+- [ ] GOOGLE_AI_API_KEY eklenmedi (gorsel uretim icin gerekli)
+
+### Sonraki Session
+- [ ] Gercek platform OAuth app'leri olustur (Meta, Google, Twitter developer portallari)
+- [ ] Admin panelden platform credentials gir ve test et
+- [ ] Diger sayfalari API'ye bagla (clients, posts, analytics mock → gercek)
+- [ ] Prisma seed data olustur
+- [ ] Production deployment hazirla
+
+### Dikkat Edilecekler
+- API artik port 6000'de calisiyor (.env'de PORT=6000, NEXT_PUBLIC_API_URL=http://localhost:6000/api/v1)
+- OAuth redirect URI artik API_URL uzerinden hesaplaniyor (APP_URL degil)
+- PlatformOAuthConfig tablosu eklendi — credentials encrypted (AES-256-GCM)
+- Dev auto-login her seferinde yeni token aliyor (stale token sorunu cozuldu)
+- Dialog component max-h-[90vh] ile sinirli, body scroll edilebilir
+- Proje 87/87 task (%100), ek ozellikler task sistemi disinda eklendi
+
+---
+
 ## 2026-03-21 — Session 3
 
 ### Completed

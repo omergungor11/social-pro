@@ -21,7 +21,9 @@ Social Pro — ajanslar icin kapsamli sosyal medya yonetim ve musteri yonetim pa
 
 ## Mevcut Durum
 
-**Progress**: 87/87 task (%100) — Tum phase'lar tamamlandi. Proje tamam.
+**Progress**: 87/87 task (%100) — Tum phase'lar tamamlandi. Ek ozellikler ekleniyor.
+
+**Son eklenenler** (Session 4): AI gorsel uretim (Gemini), centralized OAuth config, login UX iyilestirmeleri, dialog overflow fix, API port 6000.
 
 > Her yeni session'da `sp-tasks/task-index.md` oku veya `/cold-start` calistir.
 
