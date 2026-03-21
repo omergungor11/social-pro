@@ -81,11 +81,12 @@ export function Dialog({
       <div
         className={cn(
           "relative z-10 w-full rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20",
+          "max-h-[90vh] flex flex-col",
           maxWidth
         )}
       >
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div className="space-y-1 pr-8">
             <h2
               id="dialog-title"
@@ -112,8 +113,8 @@ export function Dialog({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-5">{children}</div>
+        {/* Body — scrollable when content overflows */}
+        <div className="px-6 py-5 overflow-y-auto">{children}</div>
       </div>
     </div>
   );
