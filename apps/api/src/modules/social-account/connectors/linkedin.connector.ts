@@ -1,6 +1,6 @@
 import {
   Injectable,
-  InternalServerErrorException,
+  BadRequestException,
   UnauthorizedException,
 } from "@nestjs/common";
 import type {
@@ -40,13 +40,13 @@ export class LinkedinConnector implements OAuthConnector {
 
   private get clientId(): string {
     const id = process.env["LINKEDIN_CLIENT_ID"];
-    if (!id) throw new InternalServerErrorException("LINKEDIN_CLIENT_ID is not set");
+    if (!id) throw new BadRequestException("LinkedIn connection is not configured. Please add LINKEDIN_CLIENT_ID to your environment.");
     return id;
   }
 
   private get clientSecret(): string {
     const secret = process.env["LINKEDIN_CLIENT_SECRET"];
-    if (!secret) throw new InternalServerErrorException("LINKEDIN_CLIENT_SECRET is not set");
+    if (!secret) throw new BadRequestException("LinkedIn connection is not configured. Please add LINKEDIN_CLIENT_SECRET to your environment.");
     return secret;
   }
 

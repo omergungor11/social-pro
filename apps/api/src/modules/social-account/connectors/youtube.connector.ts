@@ -1,6 +1,6 @@
 import {
   Injectable,
-  InternalServerErrorException,
+  BadRequestException,
   UnauthorizedException,
 } from "@nestjs/common";
 import type {
@@ -37,13 +37,13 @@ export class YoutubeConnector implements OAuthConnector {
 
   private get clientId(): string {
     const id = process.env["YOUTUBE_CLIENT_ID"];
-    if (!id) throw new InternalServerErrorException("YOUTUBE_CLIENT_ID is not set");
+    if (!id) throw new BadRequestException("YouTube connection is not configured. Please add YOUTUBE_CLIENT_ID to your environment.");
     return id;
   }
 
   private get clientSecret(): string {
     const secret = process.env["YOUTUBE_CLIENT_SECRET"];
-    if (!secret) throw new InternalServerErrorException("YOUTUBE_CLIENT_SECRET is not set");
+    if (!secret) throw new BadRequestException("YouTube connection is not configured. Please add YOUTUBE_CLIENT_SECRET to your environment.");
     return secret;
   }
 

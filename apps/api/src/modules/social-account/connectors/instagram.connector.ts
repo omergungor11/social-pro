@@ -1,6 +1,6 @@
 import {
   Injectable,
-  InternalServerErrorException,
+  BadRequestException,
   UnauthorizedException,
 } from "@nestjs/common";
 import type {
@@ -36,13 +36,13 @@ export class InstagramConnector implements OAuthConnector {
 
   private get clientId(): string {
     const id = process.env["INSTAGRAM_CLIENT_ID"];
-    if (!id) throw new InternalServerErrorException("INSTAGRAM_CLIENT_ID is not set");
+    if (!id) throw new BadRequestException("Instagram connection is not configured. Please add INSTAGRAM_CLIENT_ID to your environment.");
     return id;
   }
 
   private get clientSecret(): string {
     const secret = process.env["INSTAGRAM_CLIENT_SECRET"];
-    if (!secret) throw new InternalServerErrorException("INSTAGRAM_CLIENT_SECRET is not set");
+    if (!secret) throw new BadRequestException("Instagram connection is not configured. Please add INSTAGRAM_CLIENT_SECRET to your environment.");
     return secret;
   }
 

@@ -1,6 +1,6 @@
 import {
   Injectable,
-  InternalServerErrorException,
+  BadRequestException,
   UnauthorizedException,
 } from "@nestjs/common";
 import type {
@@ -39,13 +39,13 @@ export class TiktokConnector implements OAuthConnector {
 
   private get clientId(): string {
     const id = process.env["TIKTOK_CLIENT_ID"];
-    if (!id) throw new InternalServerErrorException("TIKTOK_CLIENT_ID is not set");
+    if (!id) throw new BadRequestException("TikTok connection is not configured. Please add TIKTOK_CLIENT_ID to your environment.");
     return id;
   }
 
   private get clientSecret(): string {
     const secret = process.env["TIKTOK_CLIENT_SECRET"];
-    if (!secret) throw new InternalServerErrorException("TIKTOK_CLIENT_SECRET is not set");
+    if (!secret) throw new BadRequestException("TikTok connection is not configured. Please add TIKTOK_CLIENT_SECRET to your environment.");
     return secret;
   }
 
