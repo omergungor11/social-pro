@@ -25,7 +25,7 @@ export class StripeWebhookService {
   private readonly webhookSecret: string;
 
   constructor(private readonly prisma: PrismaService) {
-    this.stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "", {
+    this.stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] || "sk_test_placeholder", {
       apiVersion: "2025-02-24.acacia",
     });
     this.webhookSecret = process.env["STRIPE_WEBHOOK_SECRET"] ?? "";

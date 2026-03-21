@@ -15,9 +15,73 @@ import {
 export interface PostPreviewProps {
   content: string;
   platform: Platform;
+  /** Single media URL (backward compat) */
   media?: string | null;
+  /** Multiple media URLs */
+  mediaList?: string[];
   authorName?: string;
   authorHandle?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-image grid component
+// ---------------------------------------------------------------------------
+
+function MediaGrid({ images }: { images: string[] }): React.JSX.Element {
+  if (images.length === 0) return <></>;
+  if (images.length === 1) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={images[0]} alt="Post media" className="w-full rounded-xl object-cover" style={{ maxHeight: '280px' }} />
+    );
+  }
+  if (images.length === 2) {
+    return (
+      <div className="grid grid-cols-2 gap-0.5 rounded-xl overflow-hidden">
+        {images.map((src, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={i} src={src} alt="" className="w-full aspect-square object-cover" />
+        ))}
+      </div>
+    );
+  }
+  if (images.length === 3) {
+    return (
+      <div className="grid grid-cols-2 gap-0.5 rounded-xl overflow-hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={images[0]} alt="" className="w-full aspect-square object-cover row-span-2" />
+        <div className="grid grid-rows-2 gap-0.5">
+          {images.slice(1).map((src, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} src={src} alt="" className="w-full aspect-[2/1] object-cover" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // 4+
+  return (
+    <div className="grid grid-cols-2 gap-0.5 rounded-xl overflow-hidden">
+      {images.slice(0, 4).map((src, i) => (
+        <div key={i} className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" className="w-full aspect-square object-cover" />
+          {i === 3 && images.length > 4 && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+              <span className="text-white text-lg font-bold">+{images.length - 4}</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Resolve media props to a list of URLs */
+function resolveMedia(media?: string | null, mediaList?: string[]): string[] {
+  if (mediaList && mediaList.length > 0) return mediaList;
+  if (media) return [media];
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -40,9 +104,11 @@ export const PLATFORM_CHAR_LIMITS: Record<Platform, number> = {
 function TwitterPreview({
   content,
   media,
+  mediaList,
   authorName,
   authorHandle,
 }: Omit<PostPreviewProps, 'platform'>): React.JSX.Element {
+  const images = resolveMedia(media, mediaList);
   const truncated = content.slice(0, PLATFORM_CHAR_LIMITS.twitter);
 
   return (
@@ -81,14 +147,10 @@ function TwitterPreview({
       )}
 
       {/* Media */}
-      {media !== undefined && media !== null && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={media}
-          alt="Post media"
-          className="mt-3 w-full rounded-xl object-cover"
-          style={{ maxHeight: '240px' }}
-        />
+      {images.length > 0 && (
+        <div className="mt-3">
+          <MediaGrid images={images} />
+        </div>
       )}
 
       {/* Engagement bar */}
@@ -121,8 +183,10 @@ function TwitterPreview({
 function InstagramPreview({
   content,
   media,
+  mediaList,
   authorName,
 }: Omit<PostPreviewProps, 'platform'>): React.JSX.Element {
+  const images = resolveMedia(media, mediaList);
   const truncated = content.slice(0, 125);
   const hasMore = content.length > 125;
 
@@ -147,13 +211,25 @@ function InstagramPreview({
       </div>
 
       {/* Image area */}
-      {media !== undefined && media !== null ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={media}
-          alt="Post media"
-          className="aspect-square w-full object-cover"
-        />
+      {images.length > 0 ? (
+        images.length === 1 ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={images[0]} alt="Post media" className="aspect-square w-full object-cover" />
+        ) : (
+          <div className="relative aspect-square w-full overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={images[0]} alt="" className="h-full w-full object-cover" />
+            <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5">
+              1/{images.length}
+            </div>
+            {/* Carousel dots */}
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+              {images.slice(0, 5).map((_, i) => (
+                <div key={i} className={cn('h-1.5 w-1.5 rounded-full', i === 0 ? 'bg-blue-500' : 'bg-white/60')} />
+              ))}
+            </div>
+          </div>
+        )
       ) : (
         <div className="aspect-square w-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
           <svg viewBox="0 0 24 24" className="h-12 w-12 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -212,8 +288,10 @@ function InstagramPreview({
 function LinkedInPreview({
   content,
   media,
+  mediaList,
   authorName,
 }: Omit<PostPreviewProps, 'platform'>): React.JSX.Element {
+  const images = resolveMedia(media, mediaList);
   const truncated = content.slice(0, 200);
   const hasMore = content.length > 200;
 
@@ -245,14 +323,10 @@ function LinkedInPreview({
       </div>
 
       {/* Media */}
-      {media !== undefined && media !== null && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={media}
-          alt="Post media"
-          className="mt-3 w-full rounded-lg object-cover"
-          style={{ maxHeight: '200px' }}
-        />
+      {images.length > 0 && (
+        <div className="mt-3">
+          <MediaGrid images={images} />
+        </div>
       )}
 
       {/* Engagement */}
@@ -284,8 +358,10 @@ function LinkedInPreview({
 function FacebookPreview({
   content,
   media,
+  mediaList,
   authorName,
 }: Omit<PostPreviewProps, 'platform'>): React.JSX.Element {
+  const images = resolveMedia(media, mediaList);
   const truncated = content.slice(0, 250);
   const hasMore = content.length > 250;
 
@@ -313,14 +389,15 @@ function FacebookPreview({
         )}
       </div>
 
-      {media !== undefined && media !== null && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={media}
-          alt="Post media"
-          className="mt-3 -mx-4 w-[calc(100%+2rem)] object-cover"
-          style={{ maxHeight: '240px' }}
-        />
+      {images.length > 0 && (
+        <div className="mt-3 -mx-4 w-[calc(100%+2rem)]">
+          {images.length === 1 ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={images[0]} alt="Post media" className="w-full object-cover" style={{ maxHeight: '240px' }} />
+          ) : (
+            <div className="px-4"><MediaGrid images={images} /></div>
+          )}
+        </div>
       )}
 
       <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-2">
@@ -349,12 +426,14 @@ function FacebookPreview({
 function GenericPreview({
   content,
   media,
+  mediaList,
   platform,
   authorName,
 }: Omit<PostPreviewProps, 'platform'> & { platform: Platform }): React.JSX.Element {
   const limit = PLATFORM_CHAR_LIMITS[platform];
   const truncated = content.slice(0, limit);
   const hasMore = content.length > limit;
+  const images = resolveMedia(media, mediaList);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm font-sans">
@@ -366,14 +445,10 @@ function GenericPreview({
         </div>
       </div>
 
-      {media !== undefined && media !== null && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={media}
-          alt="Post media"
-          className="mb-3 w-full rounded-xl object-cover"
-          style={{ maxHeight: '200px' }}
-        />
+      {images.length > 0 && (
+        <div className="mb-3">
+          <MediaGrid images={images} />
+        </div>
       )}
 
       {content.length > 0 ? (
@@ -405,52 +480,23 @@ export function PostPreview({
   content,
   platform,
   media,
+  mediaList,
   authorName,
   authorHandle,
 }: PostPreviewProps): React.JSX.Element {
+  const props = { content, media, mediaList, authorName, authorHandle };
+
   switch (platform) {
     case 'twitter':
-      return (
-        <TwitterPreview
-          content={content}
-          media={media}
-          authorName={authorName}
-          authorHandle={authorHandle}
-        />
-      );
+      return <TwitterPreview {...props} />;
     case 'instagram':
-      return (
-        <InstagramPreview
-          content={content}
-          media={media}
-          authorName={authorName}
-        />
-      );
+      return <InstagramPreview {...props} />;
     case 'linkedin':
-      return (
-        <LinkedInPreview
-          content={content}
-          media={media}
-          authorName={authorName}
-        />
-      );
+      return <LinkedInPreview {...props} />;
     case 'facebook':
-      return (
-        <FacebookPreview
-          content={content}
-          media={media}
-          authorName={authorName}
-        />
-      );
+      return <FacebookPreview {...props} />;
     default:
-      return (
-        <GenericPreview
-          content={content}
-          platform={platform}
-          media={media}
-          authorName={authorName}
-        />
-      );
+      return <GenericPreview {...props} platform={platform} />;
   }
 }
 

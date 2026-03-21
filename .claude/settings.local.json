@@ -1,0 +1,67 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git branch:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(docker compose:*)",
+      "Bash(lsof:*)",
+      "Bash(kill:*)",
+      "Bash(pnpm:*)",
+      "Bash(npx:*)",
+      "Bash(npx turbo:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(npx nest build:*)",
+      "Bash(npx next build:*)",
+      "Bash(curl:*)",
+      "Bash(nohup:*)",
+      "Bash(pkill:*)",
+      "Bash(sleep:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(cat:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(find:*)",
+      "Bash(ps:*)",
+      "Bash(which:*)",
+      "Bash(node:*)",
+      "Bash(npm:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/protect-files.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-edit-prisma.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   FileText,
@@ -21,9 +21,71 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
 import { useNotificationStore } from "@/stores/notification-store";
 import { NotificationDropdown } from "@/components/dashboard/notification-dropdown";
 import { useRealtime } from "@/hooks/use-realtime";
+
+// ---------------------------------------------------------------------------
+// User data
+// ---------------------------------------------------------------------------
+
+interface UserData {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  agencyName: string;
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function useCurrentUser() {
+  const [user, setUser] = useState<UserData | null>(null);
+  const router = useRouter();
+
+  const fetchUser = useCallback(async () => {
+    try {
+      const data = await apiClient.get<{
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+        agency: { name: string };
+      }>("/auth/me");
+      setUser({
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        agencyName: data.agency.name,
+      });
+    } catch {
+      localStorage.removeItem("sp_access_token");
+      localStorage.removeItem("sp_refresh_token");
+      router.push("/login");
+    }
+  }, [router]);
+
+  useEffect(() => {
+    void fetchUser();
+  }, [fetchUser]);
+
+  return user;
+}
+
+function handleSignOut(router: ReturnType<typeof useRouter>) {
+  localStorage.removeItem("sp_access_token");
+  localStorage.removeItem("sp_refresh_token");
+  router.push("/login");
+}
 
 // ---------------------------------------------------------------------------
 // Nav items definition
@@ -42,7 +104,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Clients", href: "/dashboard/clients", icon: Users },
   { label: "Social Accounts", href: "/dashboard/social-accounts", icon: Share2 },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { label: "AI Content", href: "/dashboard/ai-content", icon: Sparkles, badge: "New" },
+  { label: "AI Content", href: "/dashboard/ai", icon: Sparkles, badge: "New" },
   { label: "Team", href: "/dashboard/team", icon: UserPlus },
   { label: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -130,6 +192,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   onClose?: () => void;
   isMobileDrawer?: boolean;
+  user: UserData | null;
 }
 
 function Sidebar({
@@ -137,8 +200,10 @@ function Sidebar({
   onToggleCollapse,
   onClose,
   isMobileDrawer = false,
+  user,
 }: SidebarProps): React.JSX.Element {
   const pathname = usePathname();
+  const router = useRouter();
 
   function isActive(item: NavItem): boolean {
     if (item.href === "/dashboard") {
@@ -150,9 +215,9 @@ function Sidebar({
   return (
     <aside
       className={cn(
-        "flex flex-col bg-slate-900 border-r border-white/[0.06] transition-all duration-300 ease-in-out",
+        "flex flex-col h-screen bg-slate-900 border-r border-white/[0.06] transition-all duration-300 ease-in-out",
         isMobileDrawer
-          ? "w-72 h-full"
+          ? "w-72"
           : isCollapsed
           ? "w-16"
           : "w-64"
@@ -251,7 +316,7 @@ function Sidebar({
           {/* Avatar */}
           <div className="relative shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-violet-600 text-white text-xs font-semibold shadow-md">
-              JD
+              {user ? getInitials(user.name) : ".."}
             </div>
             <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-slate-900" />
           </div>
@@ -260,10 +325,10 @@ function Sidebar({
             <>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-slate-200 truncate">
-                  Jane Doe
+                  {user?.name ?? "Loading..."}
                 </p>
                 <p className="text-[10px] text-slate-500 truncate">
-                  Agency Owner
+                  {user?.role ?? ""}
                 </p>
               </div>
               <button
@@ -271,6 +336,7 @@ function Sidebar({
                 className="shrink-0 rounded-md p-1 text-slate-500 hover:text-slate-300 transition-colors"
                 aria-label="Sign out"
                 title="Sign out"
+                onClick={() => handleSignOut(router)}
               >
                 <LogOut className="h-3.5 w-3.5" />
               </button>
@@ -288,10 +354,12 @@ function Sidebar({
 
 interface HeaderProps {
   onMenuOpen: () => void;
+  user: UserData | null;
 }
 
-function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
+function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
   const pathname = usePathname();
+  const router = useRouter();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const isOpen = useNotificationStore((s) => s.isOpen);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
@@ -417,10 +485,10 @@ function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
             aria-label="User menu"
           >
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-violet-600 text-white text-xs font-semibold shadow-sm">
-              JD
+              {user ? getInitials(user.name) : ".."}
             </div>
             <span className="hidden sm:block text-sm font-medium text-slate-700">
-              Jane Doe
+              {user?.name ?? ""}
             </span>
             <ChevronDown
               className={cn(
@@ -442,10 +510,10 @@ function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
               <div className="absolute right-0 top-full mt-1.5 z-50 w-52 rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10 overflow-hidden">
                 <div className="px-3 py-2.5 border-b border-slate-100">
                   <p className="text-xs font-semibold text-slate-800">
-                    Jane Doe
+                    {user?.name ?? ""}
                   </p>
                   <p className="text-xs text-slate-500 truncate">
-                    jane@acmemedia.com
+                    {user?.email ?? ""}
                   </p>
                 </div>
                 <div className="py-1">
@@ -468,7 +536,10 @@ function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
                   <button
                     type="button"
                     className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                    onClick={() => setUserMenuOpen(false)}
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      handleSignOut(router);
+                    }}
                   >
                     <LogOut className="h-3.5 w-3.5" />
                     Sign out
@@ -490,11 +561,13 @@ function Header({ onMenuOpen }: HeaderProps): React.JSX.Element {
 interface MobileDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  user: UserData | null;
 }
 
 function MobileDrawer({
   isOpen,
   onClose,
+  user,
 }: MobileDrawerProps): React.JSX.Element {
   return (
     <>
@@ -523,6 +596,7 @@ function MobileDrawer({
           onToggleCollapse={() => {}}
           onClose={onClose}
           isMobileDrawer
+          user={user}
         />
       </div>
     </>
@@ -546,6 +620,7 @@ export function DashboardShell({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount);
+  const user = useCurrentUser();
 
   useEffect(() => {
     void fetchUnreadCount();
@@ -561,6 +636,7 @@ export function DashboardShell({
         <Sidebar
           isCollapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+          user={user}
         />
       </div>
 
@@ -568,11 +644,12 @@ export function DashboardShell({
       <MobileDrawer
         isOpen={mobileDrawerOpen}
         onClose={() => setMobileDrawerOpen(false)}
+        user={user}
       />
 
       {/* Main area */}
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        <Header onMenuOpen={() => setMobileDrawerOpen(true)} />
+        <Header onMenuOpen={() => setMobileDrawerOpen(true)} user={user} />
 
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 lg:px-8">

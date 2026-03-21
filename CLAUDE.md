@@ -110,6 +110,7 @@ Detaylar → `sp-config/agent-instructions.md`
 | Hook | Tetikleyici | Ne yapar |
 |------|------------|----------|
 | `protect-files.sh` | PreToolUse (Edit/Write) | .env, lock files, .git/, credentials duzenlemeyi bloklar |
+| `post-edit-prisma.sh` | PostToolUse (Edit) | schema.prisma degistiginde otomatik `prisma generate` calistirir |
 
 ---
 

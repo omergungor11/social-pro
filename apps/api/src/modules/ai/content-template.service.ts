@@ -84,7 +84,11 @@ export class ContentTemplateService implements OnModuleInit {
   // ---------------------------------------------------------------------------
 
   async onModuleInit(): Promise<void> {
-    await this.seedSystemTemplates();
+    try {
+      await this.seedSystemTemplates();
+    } catch (error) {
+      this.logger.warn(`System template seeding skipped: ${(error as Error).message}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

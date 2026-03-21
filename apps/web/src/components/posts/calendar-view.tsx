@@ -9,6 +9,13 @@ import { cn } from '@/lib/utils';
 
 export type PostStatus = 'draft' | 'scheduled' | 'published' | 'failed' | 'cancelled';
 
+export interface PostMetrics {
+  likes: number;
+  comments: number;
+  impressions: number;
+  engagementRate: number;
+}
+
 export interface Post {
   id: string;
   title: string;
@@ -19,6 +26,7 @@ export interface Post {
   clientId: string;
   clientName: string;
   createdAt: string;
+  metrics?: PostMetrics;
 }
 
 // ---------------------------------------------------------------------------

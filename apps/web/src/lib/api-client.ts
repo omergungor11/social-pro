@@ -27,7 +27,9 @@ type JsonBody = Record<string, unknown> | unknown[];
 // ---------------------------------------------------------------------------
 
 function getBaseUrl(): string {
-  const url = process.env["NEXT_PUBLIC_API_URL"];
+  // Must use dot notation — Next.js inlines NEXT_PUBLIC_ vars at compile time
+  // and does NOT resolve bracket notation like process.env["..."]
+  const url = process.env.NEXT_PUBLIC_API_URL;
   if (!url) {
     throw new Error(
       "NEXT_PUBLIC_API_URL is not defined. Add it to your .env.local file."

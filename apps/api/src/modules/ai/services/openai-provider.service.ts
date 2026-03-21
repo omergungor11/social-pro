@@ -18,7 +18,7 @@ export class OpenAiProviderService implements AiProvider {
 
   constructor() {
     this.client = new OpenAI({
-      apiKey: process.env["OPENAI_API_KEY"],
+      apiKey: process.env["OPENAI_API_KEY"] || "sk-placeholder",
     });
   }
 

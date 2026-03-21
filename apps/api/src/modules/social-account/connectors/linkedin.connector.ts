@@ -163,8 +163,8 @@ export class LinkedinConnector implements OAuthConnector {
 
     const displayName =
       data.name ??
-      [data.given_name, data.family_name].filter(Boolean).join(" ") ||
-      undefined;
+      ([data.given_name, data.family_name].filter(Boolean).join(" ") ||
+      undefined);
 
     return {
       platformUserId: data.sub,

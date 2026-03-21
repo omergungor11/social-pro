@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "NODE_OPTIONS='--experimental-transform-types' nest start --watch",
     "build": "nest build",
     "start": "node dist/main",
     "start:prod": "node dist/main",
@@ -15,6 +15,7 @@
     "test:cov": "vitest run --coverage"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@aws-sdk/client-s3": "^3.1011.0",
     "@aws-sdk/s3-request-presigner": "^3.1011.0",
     "@nestjs/bullmq": "^11.0.0",
@@ -25,32 +26,34 @@
     "@nestjs/platform-socket.io": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/websockets": "^11.0.0",
-    "socket.io": "^4.8.0",
     "@social-pro/prisma": "workspace:*",
     "@social-pro/shared-types": "workspace:*",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.71.0",
     "class-transformer": "^0.5.0",
     "class-validator": "^0.14.0",
-    "@anthropic-ai/sdk": "^0.39.0",
+    "dotenv": "^17.3.1",
     "ioredis": "^5.10.0",
-    "openai": "^4.96.0",
-    "stripe": "^17.7.0",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.10.0",
+    "openai": "^4.96.0",
     "reflect-metadata": "^0.2.0",
-    "rxjs": "^7.8.0"
+    "rxjs": "^7.8.0",
+    "socket.io": "^4.8.0",
+    "stripe": "^17.7.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
     "@social-pro/config-eslint": "workspace:*",
     "@social-pro/config-ts": "workspace:*",
+    "@swc/cli": "^0.8.0",
+    "@swc/core": "^1.15.18",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^5.0.0",
     "@types/multer": "^1.4.13",
-    "@types/nodemailer": "^6.4.17",
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.17",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

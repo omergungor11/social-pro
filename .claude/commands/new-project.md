@@ -74,17 +74,89 @@ rm -f BLUEPRINT.md setup.sh
 rm -f CLAUDE.md
 ```
 
+Bu adimi MUTLAKA dosya olusturmadan ONCE yap.
+
 ---
 
 ## Adim 4: Dosya Olusturma
 
-Tum cevaplar toplandiktan ve temizlik yapildiktan sonra dosyalari olustur.
+Tum cevaplar toplandiktan ve temizlik yapildiktan sonra asagidaki dosyalari SIFIRDAN OLUSTUR.
+Tum dosyalar MEVCUT DIZINDE (pwd) olusturulur.
+
+### 4.1: Dizin Yapisi
+
+```bash
+mkdir -p .claude/{commands,hooks}
+mkdir -p [PREFIX]-tasks/{phases,active}
+mkdir -p [PREFIX]-config
+mkdir -p [PREFIX]-docs
+mkdir -p [PREFIX]-plans
+```
+
+### 4.2: .claude/hooks/protect-files.sh
+
+Hassas dosyalari koruyan PreToolUse hook'u olustur ve `chmod +x` yap.
+.env, lock files, .git/, credentials dosyalarini bloklayan script.
+
+### 4.3: .claude/settings.local.json
+
+Tech stack'e gore permissions ve hooks yapilandirmasi.
+Temel git, docker, paket yoneticisi izinleri + protect-files hook'u.
+Prisma secildiyse PostToolUse'a auto-generate hook ekle.
+
+### 4.4: Slash Commands (4 adet)
+
+cold-start.md, git-full.md, turn-off.md, local-testing.md — [PREFIX] ile ozellestirilmis.
+
+### 4.5: Task Index ([PREFIX]-tasks/task-index.md)
+
+Phase sayisina gore dashboard tablosu + Phase 0 (7 task: monorepo init, meta dirs, claude setup, CLAUDE.md, docker, lint/format/ts, git init).
+
+### 4.6: Phase 0 Detay ([PREFIX]-tasks/phases/phase-0.md)
+
+7 task'in acceptance criteria ile detayli aciklamasi.
+
+### 4.7: Session Notes ([PREFIX]-tasks/active/session-notes.md)
+
+Bos template.
+
+### 4.8: Config Dosyalari
+
+- [PREFIX]-config/workflow.md — task workflow kurallari
+- [PREFIX]-config/conventions.md — tech stack'e ozel kod standartlari
+- [PREFIX]-config/tech-stack.md — teknolojiler + versiyonlar
+- [PREFIX]-config/agent-instructions.md — sub-agent rolleri ve orchestration
+
+### 4.9: Docs
+
+- [PREFIX]-docs/MEMORY.md — proje hafizasi
+- [PREFIX]-docs/CHANGELOG.md — degisiklik kaydi
+
+### 4.10: CLAUDE.md
+
+Tamamen ozellestirilmis ana konfigurasyon — hicbir placeholder kalmayacak.
+
+### 4.11: .gitignore
+
+Tech stack'e uygun .gitignore.
+
+---
+
+## Adim 5: Dogrulama
+
+1. Dosya listesini goster
+2. CLAUDE.md icerigini goster
+3. Task dashboard'u goster
+4. "Proje yapisi hazir!" mesaji ver
 
 ---
 
 ## ONEMLI KURALLAR
 
-- Hicbir adimi atlama
+- Hicbir adimi atlama, sirasiyla uygula
+- Kullanici "Other" secerse, verdigi degeri kullan
 - Tum dosyalar MEVCUT DIZINDE olusturulur
-- HICBIR PLACEHOLDER birakma
-- protect-files.sh executable olsun (`chmod +x`)
+- HICBIR PLACEHOLDER birakma — hepsi gercek degerlerle degistirilmis olmali
+- Adim 3'teki template temizligini MUTLAKA yap
+- protect-files.sh ve varsa post-edit-prisma.sh executable olsun
+- new-project.md slash command'ina DOKUNMA
