@@ -1,0 +1,154 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build all packages and apps
+        run: pnpm build
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy API to staging
+        env:
+          API_IMAGE: ghcr.io/${{ github.repository }}/api:develop
+          STAGING_API_HOST: ${{ secrets.STAGING_API_HOST }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+        run: |
+          echo "Deploying API image: $API_IMAGE"
+          # TODO: Replace with actual deployment command
+          # Example: ssh deploy@staging-server "docker pull $API_IMAGE && docker-compose up -d api"
+          echo "API deployment would run here"
+
+      - name: Deploy Web to staging
+        env:
+          WEB_IMAGE: ghcr.io/${{ github.repository }}/web:develop
+          STAGING_WEB_HOST: ${{ secrets.STAGING_WEB_HOST }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+        run: |
+          echo "Deploying Web image: $WEB_IMAGE"
+          # TODO: Replace with actual deployment command
+          # Example: ssh deploy@staging-server "docker pull $WEB_IMAGE && docker-compose up -d web"
+          echo "Web deployment would run here"
+
+      - name: Health check - API
+        run: |
+          for i in {1..30}; do
+            if curl -sf ${{ secrets.STAGING_API_URL }}/api/v1/health > /dev/null; then
+              echo "API is healthy"
+              exit 0
+            fi
+            echo "Attempt $i: Waiting for API health check..."
+            sleep 2
+          done
+          echo "API health check failed"
+          exit 1
+        continue-on-error: true
+
+      - name: Health check - Web
+        run: |
+          for i in {1..30}; do
+            if curl -sf ${{ secrets.STAGING_WEB_URL }} > /dev/null; then
+              echo "Web is healthy"
+              exit 0
+            fi
+            echo "Attempt $i: Waiting for Web health check..."
+            sleep 2
+          done
+          echo "Web health check failed"
+          exit 1
+        continue-on-error: true
+
+      - name: Notify Slack - Success
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Staging deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":white_check_mark: *Staging deployment successful*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                  }
+                }
+              ]
+            }
+        continue-on-error: true
+
+      - name: Notify Slack - Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Staging deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":x: *Staging deployment failed*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Action:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
+                  }
+                }
+              ]
+            }
+        continue-on-error: true

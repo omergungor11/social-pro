@@ -1,0 +1,169 @@
+name: Performance Testing
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle-analysis:
+    name: Bundle Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build Next.js app
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+
+      - name: Analyze bundle size
+        run: |
+          echo "Bundle size analysis:"
+          du -sh apps/web/.next/standalone 2>/dev/null || echo "No standalone build"
+          du -sh apps/web/.next/static 2>/dev/null || echo "No static assets"
+          find apps/web/.next -type f -name "*.js" -exec du -h {} \; 2>/dev/null | sort -rh | head -20 || echo "No JavaScript files"
+
+      - name: Compare bundle sizes
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Bundle comparison would be performed here"
+          # TODO: Implement bundle size comparison with main branch
+        continue-on-error: true
+
+  lighthouse:
+    name: Lighthouse Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build Next.js app
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+
+      - name: Run Lighthouse audit
+        run: |
+          echo "Lighthouse audit would run here"
+          # TODO: Implement Lighthouse CI using @lhci/cli-npm
+        continue-on-error: true
+
+  load-testing:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start test infrastructure
+        run: |
+          docker compose -f docker-compose.yml up -d postgres redis
+          sleep 10
+          docker compose -f docker-compose.yml exec -T postgres pg_isready || true
+          docker compose -f docker-compose.yml exec -T redis redis-cli ping || true
+        continue-on-error: true
+
+      - name: Run load tests
+        run: |
+          echo "Load testing would run here"
+          # TODO: Implement load testing with k6, autocannon, or similar
+        continue-on-error: true
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.yml down

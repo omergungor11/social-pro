@@ -1,0 +1,125 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'sp-docs/**'
+      - 'sp-plans/**'
+      - 'README.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'sp-docs/**'
+      - 'sp-plans/**'
+      - 'README.md'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  validate-markdown:
+    name: Validate Markdown
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Markdown formatting
+        run: pnpm format:check -- '**/*.md'
+        continue-on-error: true
+
+      - name: Check for dead links
+        run: |
+          echo "Dead link check would run here"
+          # TODO: Add markdown link checker tool
+        continue-on-error: true
+
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    needs: validate-markdown
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create docs directory
+        run: mkdir -p public/docs
+
+      - name: Copy documentation
+        run: |
+          cp -r sp-docs/* public/docs/ 2>/dev/null || true
+          cp README.md public/docs/index.md 2>/dev/null || true
+          cp -r sp-plans/* public/docs/ 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: public
+          retention-days: 30
+
+  notify-docs-change:
+    name: Notify Documentation Change
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-docs
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Documentation updated",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":book: *Documentation Updated*\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                  }
+                }
+              ]
+            }
+        continue-on-error: true

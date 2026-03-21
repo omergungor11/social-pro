@@ -8,7 +8,10 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
-    "lint:fix": "next lint --fix"
+    "lint:fix": "next lint --fix",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "next": "^15.0.0",
@@ -20,10 +23,12 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "tailwind-merge": "^2.5.5",
+    "zod": "^3.24.0",
     "zustand": "^5.0.0",
     "socket.io-client": "^4.8.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "@social-pro/config-ts": "workspace:*",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.0.0",

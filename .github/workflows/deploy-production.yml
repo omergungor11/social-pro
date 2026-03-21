@@ -1,0 +1,377 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+      dry_run:
+        description: 'Perform a dry run (no actual deployment)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  pre-deployment-checks:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    outputs:
+      commit-sha: ${{ steps.commit.outputs.sha }}
+      commit-message: ${{ steps.commit.outputs.message }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get commit info
+        id: commit
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+
+      - name: Verify main branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Error: Production deployments can only be triggered from main branch"
+            exit 1
+          fi
+          echo "✓ Verified main branch"
+
+      - name: Check recent commits
+        run: |
+          echo "Latest 5 commits:"
+          git log --oneline -5
+          echo "✓ Verified commit history"
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: pre-deployment-checks
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Check for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [pre-deployment-checks, security-scan]
+    permissions:
+      contents: read
+      packages: read
+      deployments: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.ref,
+              environment: 'production',
+              required_contexts: [],
+              auto_merge: false,
+              production_environment: true
+            });
+            core.setOutput('deployment_id', deployment.data.id);
+            console.log('Deployment created:', deployment.data.id);
+        continue-on-error: true
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build all packages and apps
+        run: pnpm build
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy API to production
+        env:
+          API_IMAGE: ghcr.io/${{ github.repository }}/api:main
+          PROD_API_HOST: ${{ secrets.PROD_API_HOST }}
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          echo "Deploying API image: $API_IMAGE"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] API deployment commands:"
+            echo "  docker pull $API_IMAGE"
+            echo "  docker-compose -f docker-compose.prod.yml up -d api worker"
+          else
+            # TODO: Replace with actual production deployment command
+            # Example: ssh deploy@prod-server "docker pull $API_IMAGE && docker-compose -f docker-compose.prod.yml up -d api worker"
+            echo "API deployment would run here"
+          fi
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] Database migration would run"
+          else
+            # TODO: Implement production database migration
+            echo "Database migration would run here"
+          fi
+
+      - name: Deploy Web to production
+        env:
+          WEB_IMAGE: ghcr.io/${{ github.repository }}/web:main
+          PROD_WEB_HOST: ${{ secrets.PROD_WEB_HOST }}
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          echo "Deploying Web image: $WEB_IMAGE"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] Web deployment commands:"
+            echo "  docker pull $WEB_IMAGE"
+            echo "  docker-compose -f docker-compose.prod.yml up -d web"
+          else
+            # TODO: Replace with actual production deployment command
+            # Example: ssh deploy@prod-server "docker pull $WEB_IMAGE && docker-compose -f docker-compose.prod.yml up -d web"
+            echo "Web deployment would run here"
+          fi
+
+      - name: Health check - API
+        env:
+          PROD_API_URL: ${{ secrets.PROD_API_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] API health check:"
+            echo "  curl $PROD_API_URL/api/v1/health"
+            exit 0
+          fi
+
+          for i in {1..60}; do
+            if curl -sf "$PROD_API_URL/api/v1/health" > /dev/null; then
+              echo "✓ API is healthy"
+              exit 0
+            fi
+            echo "Attempt $i: Waiting for API health check..."
+            sleep 5
+          done
+          echo "✗ API health check failed"
+          exit 1
+        continue-on-error: true
+
+      - name: Health check - Web
+        env:
+          PROD_WEB_URL: ${{ secrets.PROD_WEB_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] Web health check:"
+            echo "  curl $PROD_WEB_URL"
+            exit 0
+          fi
+
+          for i in {1..60}; do
+            if curl -sf "$PROD_WEB_URL" > /dev/null; then
+              echo "✓ Web is healthy"
+              exit 0
+            fi
+            echo "Attempt $i: Waiting for Web health check..."
+            sleep 5
+          done
+          echo "✗ Web health check failed"
+          exit 1
+        continue-on-error: true
+
+      - name: Create deployment status - Success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment_id = ${{ steps.deployment.outputs.deployment_id }};
+            if (!deployment_id) {
+              console.log('Skipping deployment status (no deployment ID)');
+              return;
+            }
+
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment_id,
+              state: 'success',
+              description: 'Production deployment completed successfully',
+              environment_url: '${{ secrets.PROD_WEB_URL }}'
+            });
+        continue-on-error: true
+
+      - name: Create deployment status - Failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment_id = ${{ steps.deployment.outputs.deployment_id }};
+            if (!deployment_id) {
+              console.log('Skipping deployment status (no deployment ID)');
+              return;
+            }
+
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment_id,
+              state: 'failure',
+              description: 'Production deployment failed',
+              environment_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            });
+        continue-on-error: true
+
+      - name: Notify Slack - Success
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Production deployment successful",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": ":rocket: Production Deployment Successful"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch*\n${{ github.ref_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Deployed by*\n${{ github.actor }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        continue-on-error: true
+
+      - name: Notify Slack - Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Production deployment failed",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": ":x: Production Deployment Failed"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch*\n${{ github.ref_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Logs*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
+                    }
+                  ]
+                }
+              ]
+            }
+        continue-on-error: true

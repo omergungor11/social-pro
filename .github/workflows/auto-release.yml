@@ -1,0 +1,119 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  check-version:
+    name: Check Version Change
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.version.outputs.changed }}
+      new-version: ${{ steps.version.outputs.new_version }}
+      previous-version: ${{ steps.version.outputs.previous_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get version change
+        id: version
+        run: |
+          CURRENT_VERSION=$(grep '"version"' package.json | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+          PREVIOUS_VERSION=$(git show HEAD~1:package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/' || echo "$CURRENT_VERSION")
+
+          echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "previous_version=$PREVIOUS_VERSION" >> $GITHUB_OUTPUT
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "✓ Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No version change detected"
+          fi
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: check-version
+    if: needs.check-version.outputs.version-changed == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.check-version.outputs.new-version }}"
+          PREVIOUS_VERSION="${{ needs.check-version.outputs.previous-version }}"
+
+          # Get commits between versions
+          if [ "$PREVIOUS_VERSION" != "$VERSION" ]; then
+            COMMITS=$(git log --oneline --no-decorate "$PREVIOUS_VERSION..HEAD" || git log --oneline -10)
+          else
+            COMMITS=$(git log --oneline -5)
+          fi
+
+          # Extract features, fixes, and other changes
+          FEATURES=$(echo "$COMMITS" | grep -i "feat" || echo "")
+          FIXES=$(echo "$COMMITS" | grep -i "fix" || echo "")
+          OTHERS=$(echo "$COMMITS" | grep -v "feat\|fix" || echo "")
+
+          CHANGELOG="## Release $VERSION\n\n"
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG+="### Features\n$FEATURES\n\n"
+          fi
+          if [ -n "$FIXES" ]; then
+            CHANGELOG+="### Fixes\n$FIXES\n\n"
+          fi
+          if [ -n "$OTHERS" ]; then
+            CHANGELOG+="### Other Changes\n$OTHERS\n\n"
+          fi
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ needs.check-version.outputs.new-version }}
+          name: Release ${{ needs.check-version.outputs.new-version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Release published",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":sparkles: *Release v${{ needs.check-version.outputs.new-version }} Published*\n\n${{ steps.changelog.outputs.changelog }}"
+                  }
+                }
+              ]
+            }
+        continue-on-error: true

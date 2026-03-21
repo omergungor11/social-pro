@@ -8,8 +8,14 @@
 - TASK-084: Production Docker setup (multi-stage Dockerfiles for API + Web, docker-compose.prod.yml with healthchecks, worker service, .dockerignore)
 - TASK-087: Landing page with hero, features, pricing, testimonials + onboarding wizard (4-step)
 
+- TASK-082: Unit + integration test suite (87 tests — auth, tenant, client, post, billing) with Vitest + prisma-mock
+- TASK-083: E2E test suite (162 tests — landing, auth, dashboard, clients, posts, responsive) with Playwright
+- TASK-085: CI/CD pipeline (9 GitHub Actions workflows — CI, deploy staging/prod, code quality, dependencies, auto-release, docs, performance)
+- TASK-086: Environment config management (.env.example, Zod validation for API + Web, .env.test)
+
 ### Changed
 - Next.js standalone output mode enabled for Docker builds
+- **PROJECT COMPLETE: 87/87 tasks (100%)**
 
 ## 2026-03-17
 

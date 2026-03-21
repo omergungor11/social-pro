@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { validateEnv } from "./config/env.validation";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
@@ -7,6 +8,9 @@ import { HttpExceptionFilter } from "./modules/common/filters/http-exception.fil
 import { ResponseInterceptor } from "./modules/common/interceptors/response.interceptor";
 
 async function bootstrap(): Promise<void> {
+  // Validate and fail fast on missing / malformed environment variables.
+  validateEnv();
+
   const app = await NestFactory.create(AppModule);
 
   // Global prefix
