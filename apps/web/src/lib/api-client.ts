@@ -79,6 +79,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
 
   if (!response.ok) {
+    // Auto-redirect to login on 401 (expired/missing token)
+    if (response.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("sp_access_token");
+      localStorage.removeItem("sp_refresh_token");
+      window.location.href = "/login";
+    }
+
     const errorBody = body as Partial<ApiError>;
     if (errorBody.error) {
       throw new ApiRequestError(errorBody.error);
