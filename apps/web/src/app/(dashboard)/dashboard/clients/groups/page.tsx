@@ -9,6 +9,9 @@ import {
   Trash2,
   Users,
   X,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -16,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogFooter } from '@/components/ui/dialog';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +49,23 @@ interface ClientGroup {
   description: string;
   color: GroupColor;
   members: GroupMember[];
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// API shapes
+// ---------------------------------------------------------------------------
+
+interface ApiGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  members?: {
+    id: string;
+    name: string;
+    email: string;
+  }[];
   createdAt: string;
 }
 
@@ -120,83 +141,90 @@ const COLOR_CONFIG: Record<GroupColor, ColorConfig> = {
 };
 
 const COLOR_KEYS = Object.keys(COLOR_CONFIG) as GroupColor[];
+const VALID_COLORS = new Set<string>(COLOR_KEYS);
 
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
+function toGroupColor(c: string | null | undefined): GroupColor {
+  if (c && VALID_COLORS.has(c)) return c as GroupColor;
+  return 'blue';
+}
 
-const MOCK_GROUPS: ClientGroup[] = [
-  {
-    id: 'g1',
-    name: 'Enterprise',
-    description: 'Large enterprise clients with custom SLAs and dedicated account management.',
-    color: 'violet',
-    members: [
-      { id: 'c1', name: 'Acme Corporation', email: 'contact@acme.com', avatarInitials: 'AC', avatarColor: 'from-violet-500 to-purple-600' },
-      { id: 'c9', name: 'Ironclad Legal', email: 'pr@ironcladlegal.com', avatarInitials: 'IL', avatarColor: 'from-slate-500 to-gray-600' },
-    ],
-    createdAt: '2024-01-01',
-  },
-  {
-    id: 'g2',
-    name: 'Startup',
-    description: 'High-growth startups with flexible content needs and fast turnaround.',
-    color: 'blue',
-    members: [
-      { id: 'c6', name: 'Founders Launchpad', email: 'team@founderslaunchpad.co', avatarInitials: 'FL', avatarColor: 'from-amber-500 to-orange-600' },
-      { id: 'c8', name: 'Harbor Analytics', email: 'growth@harboranalytics.ai', avatarInitials: 'HA', avatarColor: 'from-sky-500 to-blue-600' },
-      { id: 'c12', name: 'Luminary Fintech', email: 'content@luminaryfintech.io', avatarInitials: 'LF', avatarColor: 'from-indigo-500 to-violet-600' },
-    ],
-    createdAt: '2024-01-01',
-  },
-  {
-    id: 'g3',
-    name: 'E-commerce',
-    description: 'Online retail brands running product campaigns and seasonal promotions.',
-    color: 'pink',
-    members: [
-      { id: 'c5', name: 'Echo Commerce', email: 'marketing@echocommerce.shop', avatarInitials: 'EC', avatarColor: 'from-pink-500 to-rose-600' },
-      { id: 'c7', name: 'Greenleaf Organics', email: 'hello@greenleaforganics.com', avatarInitials: 'GO', avatarColor: 'from-lime-500 to-green-600' },
-      { id: 'c10', name: 'Jasmine Beauty Co.', email: 'social@jasminebeauty.com', avatarInitials: 'JB', avatarColor: 'from-fuchsia-500 to-pink-600' },
-      { id: 'c15', name: 'Olympus Fitness', email: 'marketing@olympusfitness.com', avatarInitials: 'OF', avatarColor: 'from-yellow-500 to-amber-600' },
-    ],
-    createdAt: '2024-01-01',
-  },
-  {
-    id: 'g4',
-    name: 'Healthcare',
-    description: 'Healthcare providers and wellness brands requiring compliance oversight.',
-    color: 'emerald',
-    members: [
-      { id: 'c4', name: 'Delta Health Partners', email: 'social@deltahealth.com', avatarInitials: 'DH', avatarColor: 'from-green-500 to-emerald-600' },
-    ],
-    createdAt: '2024-01-15',
-  },
-  {
-    id: 'g5',
-    name: 'SaaS',
-    description: 'Software-as-a-service companies with technical content and developer audiences.',
-    color: 'cyan',
-    members: [
-      { id: 'c3', name: 'CloudSync Systems', email: 'ops@cloudsync.tech', avatarInitials: 'CS', avatarColor: 'from-blue-500 to-cyan-600' },
-      { id: 'c8', name: 'Harbor Analytics', email: 'growth@harboranalytics.ai', avatarInitials: 'HA', avatarColor: 'from-sky-500 to-blue-600' },
-      { id: 'c12', name: 'Luminary Fintech', email: 'content@luminaryfintech.io', avatarInitials: 'LF', avatarColor: 'from-indigo-500 to-violet-600' },
-      { id: 'c14', name: 'NorthWave Software', email: 'brand@northwave.dev', avatarInitials: 'NW', avatarColor: 'from-cyan-500 to-sky-600' },
-    ],
-    createdAt: '2024-02-01',
-  },
-  {
-    id: 'g6',
-    name: 'Agency',
-    description: 'Creative and marketing agencies managing multiple brand identities.',
-    color: 'amber',
-    members: [
-      { id: 'c2', name: 'Bright Ideas Studio', email: 'hello@brightideas.io', avatarInitials: 'BI', avatarColor: 'from-emerald-500 to-teal-600' },
-      { id: 'c13', name: 'Metro Event Group', email: 'social@metroeventgroup.com', avatarInitials: 'ME', avatarColor: 'from-orange-500 to-red-600' },
-    ],
-    createdAt: '2024-02-15',
-  },
+const AVATAR_COLORS = [
+  'from-violet-500 to-purple-600',
+  'from-blue-500 to-cyan-600',
+  'from-emerald-500 to-teal-600',
+  'from-pink-500 to-rose-600',
+  'from-amber-500 to-orange-600',
 ];
+
+function getAvatarColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) & 0xffffffff;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join('');
+}
+
+function mapApiGroup(g: ApiGroup): ClientGroup {
+  return {
+    id: g.id,
+    name: g.name,
+    description: g.description ?? '',
+    color: toGroupColor(g.color),
+    members: (g.members ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      avatarInitials: getInitials(m.name),
+      avatarColor: getAvatarColor(m.id),
+    })),
+    createdAt: g.createdAt.slice(0, 10),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+function Toast({
+  message,
+  type,
+  onClose,
+}: {
+  message: string;
+  type: 'success' | 'error';
+  onClose: () => void;
+}): React.JSX.Element {
+  React.useEffect(() => {
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div
+      className={cn(
+        'fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg',
+        type === 'success'
+          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+          : 'bg-red-50 text-red-800 border border-red-200'
+      )}
+    >
+      {type === 'success' ? (
+        <CheckCircle2 className="h-4 w-4" />
+      ) : (
+        <AlertCircle className="h-4 w-4" />
+      )}
+      {message}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Form state
@@ -301,7 +329,7 @@ function MembersPanel({
               </div>
               <div className="min-w-0 flex-1">
                 <Link
-                  href={`/clients/${member.id}`}
+                  href={`/dashboard/clients/${member.id}`}
                   className="text-sm font-medium text-slate-700 hover:text-blue-600 transition-colors truncate block"
                   onClick={onClose}
                 >
@@ -443,7 +471,11 @@ function GroupCard({ group, onView, onEdit, onDelete }: GroupCardProps): React.J
 // ---------------------------------------------------------------------------
 
 export default function ClientGroupsPage(): React.JSX.Element {
-  const [groups, setGroups] = React.useState<ClientGroup[]>(MOCK_GROUPS);
+  const [groups, setGroups] = React.useState<ClientGroup[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [saving, setSaving] = React.useState(false);
 
   // Dialogs
   type DialogState =
@@ -455,6 +487,25 @@ export default function ClientGroupsPage(): React.JSX.Element {
 
   const [dialog, setDialog] = React.useState<DialogState>(null);
   const [form, setForm] = React.useState<GroupForm>(EMPTY_FORM);
+
+  // ── Fetch groups ──────────────────────────────────────────────────────────
+  const fetchGroups = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await apiClient.get<ApiGroup[]>('/clients/groups');
+      setGroups(data.map(mapApiGroup));
+    } catch (err) {
+      console.error('Failed to fetch groups:', err);
+      setError('Failed to load groups. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchGroups();
+  }, [fetchGroups]);
 
   function openCreate(): void {
     setForm(EMPTY_FORM);
@@ -472,49 +523,83 @@ export default function ClientGroupsPage(): React.JSX.Element {
   }
 
   // Create
-  function handleCreate(): void {
+  async function handleCreate(): Promise<void> {
     if (!form.name.trim()) return;
-    const newGroup: ClientGroup = {
-      id: `g${Date.now()}`,
-      name: form.name.trim(),
-      description: form.description.trim(),
-      color: form.color,
-      members: [],
-      createdAt: new Date().toISOString().slice(0, 10),
-    };
-    setGroups((prev) => [...prev, newGroup]);
-    closeDialog();
+    setSaving(true);
+    try {
+      const created = await apiClient.post<ApiGroup>('/clients/groups', {
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        color: form.color,
+      });
+      setGroups((prev) => [...prev, mapApiGroup(created)]);
+      closeDialog();
+      setToast({ message: 'Group created', type: 'success' });
+    } catch (err) {
+      console.error('Failed to create group:', err);
+      setToast({ message: 'Failed to create group. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Edit
-  function handleEdit(): void {
+  async function handleEdit(): Promise<void> {
     if (dialog?.type !== 'edit' || !form.name.trim()) return;
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === dialog.group.id
-          ? { ...g, name: form.name.trim(), description: form.description.trim(), color: form.color }
-          : g
-      )
-    );
-    closeDialog();
+    setSaving(true);
+    try {
+      const updated = await apiClient.patch<ApiGroup>(`/clients/groups/${dialog.group.id}`, {
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        color: form.color,
+      });
+      setGroups((prev) =>
+        prev.map((g) => (g.id === dialog.group.id ? mapApiGroup(updated) : g))
+      );
+      closeDialog();
+      setToast({ message: 'Group updated', type: 'success' });
+    } catch (err) {
+      console.error('Failed to update group:', err);
+      setToast({ message: 'Failed to update group. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Delete
-  function handleDelete(): void {
+  async function handleDelete(): Promise<void> {
     if (dialog?.type !== 'delete') return;
-    setGroups((prev) => prev.filter((g) => g.id !== dialog.group.id));
-    closeDialog();
+    setSaving(true);
+    try {
+      await apiClient.delete(`/clients/groups/${dialog.group.id}`);
+      setGroups((prev) => prev.filter((g) => g.id !== dialog.group.id));
+      closeDialog();
+      setToast({ message: 'Group deleted', type: 'success' });
+    } catch (err) {
+      console.error('Failed to delete group:', err);
+      setToast({ message: 'Failed to delete group. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   }
 
   const totalMembers = groups.reduce((sum, g) => sum + g.members.length, 0);
 
   return (
     <>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <div className="space-y-6">
         {/* Page header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/clients">
+            <Link href="/dashboard/clients">
               <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Back to clients">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -522,7 +607,9 @@ export default function ClientGroupsPage(): React.JSX.Element {
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Client Groups</h1>
               <p className="mt-0.5 text-sm text-slate-500">
-                {groups.length} groups · {totalMembers} total assignments
+                {loading
+                  ? 'Loading groups...'
+                  : `${groups.length} group${groups.length !== 1 ? 's' : ''} · ${totalMembers} total assignment${totalMembers !== 1 ? 's' : ''}`}
               </p>
             </div>
           </div>
@@ -532,8 +619,27 @@ export default function ClientGroupsPage(): React.JSX.Element {
           </Button>
         </div>
 
-        {/* Groups grid */}
-        {groups.length === 0 ? (
+        {/* Error state */}
+        {error && (
+          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+            <button
+              type="button"
+              onClick={() => void fetchGroups()}
+              className="ml-auto text-xs underline hover:no-underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+          </div>
+        ) : groups.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed border-slate-200 py-20">
             <Users className="h-12 w-12 text-slate-200" />
             <div className="text-center">
@@ -617,8 +723,18 @@ export default function ClientGroupsPage(): React.JSX.Element {
             <Button variant="outline" onClick={closeDialog}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={!form.name.trim()}>
-              Create Group
+            <Button
+              onClick={() => void handleCreate()}
+              disabled={!form.name.trim() || saving}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Group'
+              )}
             </Button>
           </DialogFooter>
         </div>
@@ -663,8 +779,18 @@ export default function ClientGroupsPage(): React.JSX.Element {
             <Button variant="outline" onClick={closeDialog}>
               Cancel
             </Button>
-            <Button onClick={handleEdit} disabled={!form.name.trim()}>
-              Save Changes
+            <Button
+              onClick={() => void handleEdit()}
+              disabled={!form.name.trim() || saving}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
             </Button>
           </DialogFooter>
         </div>
@@ -687,8 +813,19 @@ export default function ClientGroupsPage(): React.JSX.Element {
           <Button variant="outline" onClick={closeDialog}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={handleDelete}>
-            Delete Group
+          <Button
+            variant="destructive"
+            onClick={() => void handleDelete()}
+            disabled={saving}
+          >
+            {saving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete Group'
+            )}
           </Button>
         </DialogFooter>
       </Dialog>

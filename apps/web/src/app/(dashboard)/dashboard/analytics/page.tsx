@@ -9,6 +9,8 @@ import {
   Eye,
   FileText,
   Filter,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import { PlatformIcon, type Platform } from '@/components/social/platform-icon';
 import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,72 +63,68 @@ interface TopPost {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API response types
 // ---------------------------------------------------------------------------
 
-const OVERVIEW_METRICS: OverviewMetric[] = [
-  {
-    label: 'Total Followers',
-    value: '248,392',
-    change: 12.4,
-    icon: Users,
-    iconBg: 'bg-blue-50',
-    iconColor: 'text-blue-600',
-  },
-  {
-    label: 'Engagement Rate',
-    value: '4.87%',
-    change: 0.6,
-    icon: BarChart3,
-    iconBg: 'bg-violet-50',
-    iconColor: 'text-violet-600',
-  },
-  {
-    label: 'Total Impressions',
-    value: '1.24M',
-    change: -3.2,
-    icon: Eye,
-    iconBg: 'bg-amber-50',
-    iconColor: 'text-amber-600',
-  },
-  {
-    label: 'Posts Published',
-    value: '142',
-    change: 8.1,
-    icon: FileText,
-    iconBg: 'bg-emerald-50',
-    iconColor: 'text-emerald-600',
-  },
-];
+interface ApiOverviewResponse {
+  totalFollowers?: number;
+  followerChange?: number;
+  engagementRate?: number;
+  engagementRateChange?: number;
+  totalImpressions?: number;
+  impressionChange?: number;
+  postsPublished?: number;
+  postsChange?: number;
+  platformBreakdown?: Array<{
+    platform: string;
+    followers?: number;
+    followerChange?: number;
+    engagementRate?: number;
+    impressions?: number;
+  }>;
+  topPosts?: Array<{
+    id: string;
+    platform: string;
+    content?: string;
+    publishedAt?: string;
+    likes?: number;
+    comments?: number;
+    shares?: number;
+    engagementRate?: number;
+  }>;
+}
 
-const PLATFORM_STATS: PlatformStat[] = [
-  { platform: 'instagram', followers: 92400, followerChange: 5.3, engagementRate: 6.2, impressions: 480000 },
-  { platform: 'linkedin', followers: 67800, followerChange: 11.8, engagementRate: 3.9, impressions: 290000 },
-  { platform: 'twitter', followers: 54200, followerChange: -1.2, engagementRate: 2.7, impressions: 210000 },
-  { platform: 'facebook', followers: 33992, followerChange: 2.1, engagementRate: 1.8, impressions: 140000 },
-  { platform: 'tiktok', followers: 0, followerChange: 0, engagementRate: 0, impressions: 120000 },
-];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const TOP_POSTS: TopPost[] = [
-  { id: 'p1', platform: 'instagram', content: 'Excited to announce our partnership with Acme Corp! Together we\'re building the future of social...', publishedAt: 'Mar 15', likes: 1842, comments: 214, shares: 89, engagementRate: 8.4 },
-  { id: 'p2', platform: 'linkedin', content: '5 social media trends every marketing agency needs to know in 2026. Thread below...', publishedAt: 'Mar 12', likes: 967, comments: 132, shares: 201, engagementRate: 6.9 },
-  { id: 'p3', platform: 'twitter', content: 'Hot take: most agencies are measuring the wrong metrics. Here\'s what actually drives client ROI...', publishedAt: 'Mar 10', likes: 723, comments: 88, shares: 312, engagementRate: 5.7 },
-  { id: 'p4', platform: 'facebook', content: 'Behind the scenes of our agency\'s monthly strategy session. Our team reviews every client dashboard...', publishedAt: 'Mar 8', likes: 541, comments: 67, shares: 45, engagementRate: 4.8 },
-  { id: 'p5', platform: 'instagram', content: 'New case study alert: how we helped Globex Media grow their Instagram following by 340% in 90 days.', publishedAt: 'Mar 5', likes: 489, comments: 73, shares: 38, engagementRate: 4.2 },
-];
+function formatBigNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function getRangeDate(range: DateRange): { startDate: string; endDate: string } {
+  const end = new Date();
+  const start = new Date();
+  const days = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+  start.setDate(start.getDate() - days);
+  const fmt = (d: Date): string => d.toISOString().split('T')[0] ?? '';
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const ACCOUNT_FILTER_OPTIONS = [
   { value: 'all', label: 'All Accounts' },
-  { value: 'acme-corp', label: 'Acme Corp' },
-  { value: 'globex-media', label: 'Globex Media' },
-  { value: 'initech', label: 'Initech Solutions' },
 ];
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-// Date range tab
 interface DateRangeTabsProps {
   value: DateRange;
   onChange: (range: DateRange) => void;
@@ -165,7 +164,6 @@ function DateRangeTabs({ value, onChange }: DateRangeTabsProps): React.JSX.Eleme
   );
 }
 
-// Overview metric card
 function MetricCard({ metric }: { metric: OverviewMetric }): React.JSX.Element {
   const Icon = metric.icon;
   const isPositive = metric.change >= 0;
@@ -202,7 +200,6 @@ function MetricCard({ metric }: { metric: OverviewMetric }): React.JSX.Element {
   );
 }
 
-// Chart placeholder
 interface ChartPlaceholderProps {
   title: string;
   description: string;
@@ -239,7 +236,6 @@ function ChartPlaceholder({ title, description, mockNumbers }: ChartPlaceholderP
   );
 }
 
-// Platform breakdown card
 function PlatformBreakdownCard({ stat }: { stat: PlatformStat }): React.JSX.Element {
   const isPositive = stat.followerChange >= 0;
 
@@ -283,6 +279,96 @@ function PlatformBreakdownCard({ stat }: { stat: PlatformStat }): React.JSX.Elem
 export default function AnalyticsPage(): React.JSX.Element {
   const [dateRange, setDateRange] = React.useState<DateRange>('30d');
   const [account, setAccount] = React.useState('all');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [overviewMetrics, setOverviewMetrics] = React.useState<OverviewMetric[]>([]);
+  const [platformStats, setPlatformStats] = React.useState<PlatformStat[]>([]);
+  const [topPosts, setTopPosts] = React.useState<TopPost[]>([]);
+
+  const fetchOverview = React.useCallback(async (range: DateRange): Promise<void> => {
+    if (range === 'custom') return; // Custom range requires date picker — skip auto-fetch
+    setLoading(true);
+    setError(null);
+    try {
+      const { startDate, endDate } = getRangeDate(range);
+      const data = await apiClient.get<ApiOverviewResponse>(
+        `/analytics/overview?startDate=${startDate}&endDate=${endDate}`
+      );
+
+      const metrics: OverviewMetric[] = [
+        {
+          label: 'Total Followers',
+          value: formatBigNumber(data.totalFollowers ?? 0),
+          change: Math.round((data.followerChange ?? 0) * 10) / 10,
+          icon: Users,
+          iconBg: 'bg-blue-50',
+          iconColor: 'text-blue-600',
+        },
+        {
+          label: 'Engagement Rate',
+          value: `${(data.engagementRate ?? 0).toFixed(2)}%`,
+          change: Math.round((data.engagementRateChange ?? 0) * 10) / 10,
+          icon: BarChart3,
+          iconBg: 'bg-violet-50',
+          iconColor: 'text-violet-600',
+        },
+        {
+          label: 'Total Impressions',
+          value: formatBigNumber(data.totalImpressions ?? 0),
+          change: Math.round((data.impressionChange ?? 0) * 10) / 10,
+          icon: Eye,
+          iconBg: 'bg-amber-50',
+          iconColor: 'text-amber-600',
+        },
+        {
+          label: 'Posts Published',
+          value: (data.postsPublished ?? 0).toLocaleString(),
+          change: Math.round((data.postsChange ?? 0) * 10) / 10,
+          icon: FileText,
+          iconBg: 'bg-emerald-50',
+          iconColor: 'text-emerald-600',
+        },
+      ];
+
+      setOverviewMetrics(metrics);
+
+      const platforms: PlatformStat[] = (data.platformBreakdown ?? []).map((p) => ({
+        platform: p.platform as Platform,
+        followers: p.followers ?? 0,
+        followerChange: Math.round((p.followerChange ?? 0) * 10) / 10,
+        engagementRate: Math.round((p.engagementRate ?? 0) * 10) / 10,
+        impressions: p.impressions ?? 0,
+      }));
+      setPlatformStats(platforms);
+
+      const posts: TopPost[] = (data.topPosts ?? []).map((p) => ({
+        id: p.id,
+        platform: p.platform as Platform,
+        content: p.content ?? '',
+        publishedAt: p.publishedAt
+          ? new Date(p.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          : '—',
+        likes: p.likes ?? 0,
+        comments: p.comments ?? 0,
+        shares: p.shares ?? 0,
+        engagementRate: Math.round((p.engagementRate ?? 0) * 10) / 10,
+      }));
+      setTopPosts(posts);
+    } catch (err) {
+      console.error('[AnalyticsPage] Failed to fetch overview:', err);
+      setError('Failed to load analytics data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchOverview(dateRange);
+  }, [fetchOverview, dateRange]);
+
+  const handleDateRangeChange = (range: DateRange): void => {
+    setDateRange(range);
+  };
 
   return (
     <div className="space-y-8">
@@ -306,105 +392,158 @@ export default function AnalyticsPage(): React.JSX.Element {
               className="w-44"
             />
           </div>
-          <DateRangeTabs value={dateRange} onChange={setDateRange} />
+          <DateRangeTabs value={dateRange} onChange={handleDateRangeChange} />
         </div>
       </div>
 
-      {/* Overview metrics */}
-      <section aria-label="Overview metrics">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {OVERVIEW_METRICS.map((m) => (
-            <MetricCard key={m.label} metric={m} />
-          ))}
-        </div>
-      </section>
-
-      {/* Charts */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ChartPlaceholder
-          title="Follower Growth"
-          description="Cumulative followers across all platforms"
-          mockNumbers={['Jan: 218K', 'Feb: 231K', 'Mar: 248K', 'Peak: 248,392', 'Growth: +13.9%']}
-        />
-        <ChartPlaceholder
-          title="Engagement Rate"
-          description="Average engagement rate per day"
-          mockNumbers={['Avg: 4.87%', 'Peak: 8.4%', 'Low: 1.8%', 'Best day: Tuesday', 'Best platform: Instagram']}
-        />
-      </div>
-
-      {/* Platform breakdown */}
-      <section aria-labelledby="platform-breakdown-heading">
-        <h2
-          id="platform-breakdown-heading"
-          className="text-sm font-semibold text-slate-700 mb-4"
-        >
-          Platform Breakdown
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {PLATFORM_STATS.map((stat) => (
-            <PlatformBreakdownCard key={stat.platform} stat={stat} />
-          ))}
-        </div>
-      </section>
-
-      {/* Top performing posts */}
-      <section aria-labelledby="top-posts-heading">
-        <div className="flex items-center justify-between mb-4">
-          <h2
-            id="top-posts-heading"
-            className="text-sm font-semibold text-slate-700"
+      {/* Error state */}
+      {error !== null && (
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-500" aria-hidden="true" />
+          <span>{error}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-100"
+            onClick={() => void fetchOverview(dateRange)}
           >
-            Top Performing Posts
-          </h2>
-          <Badge variant="default">Top 5 by engagement</Badge>
+            Retry
+          </Button>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Post</TableHead>
-              <TableHead>Platform</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead className="text-right">Likes</TableHead>
-              <TableHead className="text-right">Comments</TableHead>
-              <TableHead className="text-right">Shares</TableHead>
-              <TableHead className="text-right">Engagement</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {TOP_POSTS.map((post) => (
-              <TableRow key={post.id}>
-                <TableCell className="max-w-xs">
-                  <p className="truncate text-slate-700">{post.content}</p>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <PlatformIcon platform={post.platform} size="sm" />
-                    <span className="sr-only capitalize">{post.platform}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-slate-500">
-                  {post.publishedAt}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {post.likes.toLocaleString()}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {post.comments.toLocaleString()}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {post.shares.toLocaleString()}
-                </TableCell>
-                <TableCell className="text-right">
-                  <span className="font-semibold text-emerald-600 tabular-nums">
-                    {post.engagementRate}%
-                  </span>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-slate-400" aria-label="Loading analytics..." />
+        </div>
+      )}
+
+      {!loading && (
+        <>
+          {/* Overview metrics */}
+          <section aria-label="Overview metrics">
+            {overviewMetrics.length > 0 ? (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {overviewMetrics.map((m) => (
+                  <MetricCard key={m.label} metric={m} />
+                ))}
+              </div>
+            ) : error === null && (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {['Total Followers', 'Engagement Rate', 'Total Impressions', 'Posts Published'].map((label) => (
+                  <Card key={label} className="overflow-hidden">
+                    <CardContent className="p-6">
+                      <p className="text-sm font-medium text-slate-500">{label}</p>
+                      <p className="mt-3 text-3xl font-bold text-slate-300">—</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Charts */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <ChartPlaceholder
+              title="Follower Growth"
+              description="Cumulative followers across all platforms"
+              mockNumbers={['Fetched from /analytics/overview', 'Recharts integration pending']}
+            />
+            <ChartPlaceholder
+              title="Engagement Rate"
+              description="Average engagement rate per day"
+              mockNumbers={['Fetched from /analytics/overview', 'Recharts integration pending']}
+            />
+          </div>
+
+          {/* Platform breakdown */}
+          {platformStats.length > 0 && (
+            <section aria-labelledby="platform-breakdown-heading">
+              <h2
+                id="platform-breakdown-heading"
+                className="text-sm font-semibold text-slate-700 mb-4"
+              >
+                Platform Breakdown
+              </h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                {platformStats.map((stat) => (
+                  <PlatformBreakdownCard key={stat.platform} stat={stat} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Top performing posts */}
+          {topPosts.length > 0 && (
+            <section aria-labelledby="top-posts-heading">
+              <div className="flex items-center justify-between mb-4">
+                <h2
+                  id="top-posts-heading"
+                  className="text-sm font-semibold text-slate-700"
+                >
+                  Top Performing Posts
+                </h2>
+                <Badge variant="default">Top {topPosts.length} by engagement</Badge>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Post</TableHead>
+                    <TableHead>Platform</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Likes</TableHead>
+                    <TableHead className="text-right">Comments</TableHead>
+                    <TableHead className="text-right">Shares</TableHead>
+                    <TableHead className="text-right">Engagement</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {topPosts.map((post) => (
+                    <TableRow key={post.id}>
+                      <TableCell className="max-w-xs">
+                        <p className="truncate text-slate-700">{post.content}</p>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <PlatformIcon platform={post.platform} size="sm" />
+                          <span className="sr-only capitalize">{post.platform}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-slate-500">
+                        {post.publishedAt}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {post.likes.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {post.comments.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {post.shares.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="font-semibold text-emerald-600 tabular-nums">
+                          {post.engagementRate}%
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </section>
+          )}
+
+          {/* Empty state when no data and no error */}
+          {error === null && overviewMetrics.length === 0 && platformStats.length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 py-16 text-center">
+              <BarChart3 className="h-10 w-10 text-slate-300" aria-hidden="true" />
+              <p className="mt-3 text-sm font-medium text-slate-600">No analytics data yet</p>
+              <p className="mt-1 text-xs text-slate-400">Publish some posts to start seeing metrics here.</p>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

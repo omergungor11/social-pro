@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,16 +46,76 @@ interface Report {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API response types
 // ---------------------------------------------------------------------------
 
-const MOCK_REPORTS: Report[] = [
-  { id: 'r1', title: 'Acme Corp — March 2026 Monthly Report', dateRange: 'Mar 1 – Mar 31, 2026', type: 'monthly', status: 'ready', createdAt: 'Mar 18, 2026', client: 'Acme Corp' },
-  { id: 'r2', title: 'Globex Media — Week 11 Report', dateRange: 'Mar 10 – Mar 16, 2026', type: 'weekly', status: 'ready', createdAt: 'Mar 17, 2026', client: 'Globex Media' },
-  { id: 'r3', title: 'Initech — Q1 Custom Performance Report', dateRange: 'Jan 1 – Mar 31, 2026', type: 'custom', status: 'generating', createdAt: 'Mar 18, 2026', client: 'Initech Solutions' },
-  { id: 'r4', title: 'Umbrella Corp — Week 10 Report', dateRange: 'Mar 3 – Mar 9, 2026', type: 'weekly', status: 'ready', createdAt: 'Mar 10, 2026', client: 'Umbrella Corp' },
-  { id: 'r5', title: 'Soylent Media — February Monthly Report', dateRange: 'Feb 1 – Feb 28, 2026', type: 'monthly', status: 'failed', createdAt: 'Mar 1, 2026', client: 'Soylent Media' },
-];
+interface ApiReport {
+  id: string;
+  title?: string;
+  name?: string;
+  startDate?: string;
+  endDate?: string;
+  dateRange?: string;
+  type?: string;
+  reportType?: string;
+  status?: string;
+  createdAt?: string;
+  clientName?: string;
+  client?: string | { name?: string };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function mapApiReport(r: ApiReport): Report {
+  // Normalise status — API may return different casing or values
+  const rawStatus = (r.status ?? 'ready').toLowerCase();
+  let status: ReportStatus = 'ready';
+  if (rawStatus === 'generating' || rawStatus === 'pending' || rawStatus === 'processing') {
+    status = 'generating';
+  } else if (rawStatus === 'failed' || rawStatus === 'error') {
+    status = 'failed';
+  }
+
+  // Normalise type
+  const rawType = (r.type ?? r.reportType ?? 'custom').toLowerCase();
+  let type: ReportType = 'custom';
+  if (rawType === 'weekly') type = 'weekly';
+  else if (rawType === 'monthly') type = 'monthly';
+
+  // Date range label
+  let dateRange = r.dateRange ?? '';
+  if (!dateRange && r.startDate && r.endDate) {
+    const fmt = (s: string): string =>
+      new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    dateRange = `${fmt(r.startDate)} – ${fmt(r.endDate)}`;
+  }
+
+  // Client label
+  let client = '';
+  if (typeof r.client === 'string') {
+    client = r.client;
+  } else if (r.client && typeof r.client === 'object') {
+    client = r.client.name ?? '';
+  }
+  if (!client) client = r.clientName ?? '';
+
+  // Created at
+  const createdAt = r.createdAt
+    ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
+
+  return {
+    id: r.id,
+    title: r.title ?? r.name ?? 'Untitled Report',
+    dateRange,
+    type,
+    status,
+    createdAt,
+    client,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -114,19 +176,28 @@ function StatusBadge({ status }: { status: ReportStatus }): React.JSX.Element {
   );
 }
 
-// Platform checkboxes for the dialog
 const PLATFORMS = ['LinkedIn', 'Twitter / X', 'Instagram', 'Facebook', 'TikTok', 'YouTube'];
 
 interface GenerateReportDialogProps {
   open: boolean;
   onClose: () => void;
-  onGenerate: (report: Omit<Report, 'id' | 'status' | 'createdAt'>) => void;
+  onGenerate: (payload: {
+    title: string;
+    clientId: string;
+    clientLabel: string;
+    type: ReportType;
+    startDate: string;
+    endDate: string;
+    platforms: string[];
+  }) => void;
+  submitting: boolean;
 }
 
 function GenerateReportDialog({
   open,
   onClose,
   onGenerate,
+  submitting,
 }: GenerateReportDialogProps): React.JSX.Element {
   const [title, setTitle] = React.useState('');
   const [client, setClient] = React.useState('');
@@ -165,13 +236,16 @@ function GenerateReportDialog({
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     e.preventDefault();
-    if (!isValid) return;
+    if (!isValid || submitting) return;
     const clientLabel = CLIENT_OPTIONS.find((c) => c.value === client)?.label ?? client;
     onGenerate({
       title: title.trim(),
-      dateRange: `${dateFrom} – ${dateTo}`,
+      clientId: client,
+      clientLabel,
       type: reportType,
-      client: clientLabel,
+      startDate: dateFrom,
+      endDate: dateTo,
+      platforms: Array.from(selectedPlatforms),
     });
   }
 
@@ -208,7 +282,6 @@ function GenerateReportDialog({
           onChange={(e) => setReportType(e.target.value as ReportType)}
         />
 
-        {/* Date range */}
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="From"
@@ -226,7 +299,6 @@ function GenerateReportDialog({
           />
         </div>
 
-        {/* Platform checkboxes */}
         <div className="space-y-2">
           <p className="text-sm font-medium">Platforms</p>
           <div className="grid grid-cols-2 gap-2">
@@ -242,12 +314,16 @@ function GenerateReportDialog({
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!isValid}>
-            <FileBarChart className="h-4 w-4" />
-            Generate Report
+          <Button type="submit" disabled={!isValid || submitting}>
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <FileBarChart className="h-4 w-4" aria-hidden="true" />
+            )}
+            {submitting ? 'Generating...' : 'Generate Report'}
           </Button>
         </DialogFooter>
       </form>
@@ -260,24 +336,76 @@ function GenerateReportDialog({
 // ---------------------------------------------------------------------------
 
 export default function ReportsPage(): React.JSX.Element {
-  const [reports, setReports] = React.useState<Report[]>(MOCK_REPORTS);
+  const [reports, setReports] = React.useState<Report[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
 
-  function handleGenerate(
-    data: Omit<Report, 'id' | 'status' | 'createdAt'>
-  ): void {
-    const newReport: Report = {
-      id: `r-${Date.now()}`,
-      ...data,
-      status: 'generating',
-      createdAt: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      }),
-    };
-    setReports((prev) => [newReport, ...prev]);
-    setDialogOpen(false);
+  const fetchReports = React.useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiClient.get<ApiReport[] | { items?: ApiReport[] }>('/analytics/reports');
+      const items = Array.isArray(data) ? data : (data.items ?? []);
+      setReports(items.map(mapApiReport));
+    } catch (err) {
+      console.error('[ReportsPage] Failed to fetch reports:', err);
+      setError('Failed to load reports. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchReports();
+  }, [fetchReports]);
+
+  async function handleGenerate(payload: {
+    title: string;
+    clientId: string;
+    clientLabel: string;
+    type: ReportType;
+    startDate: string;
+    endDate: string;
+    platforms: string[];
+  }): Promise<void> {
+    setSubmitting(true);
+    try {
+      const created = await apiClient.post<ApiReport>('/analytics/reports', {
+        title: payload.title,
+        clientId: payload.clientId,
+        type: payload.type,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        platforms: payload.platforms,
+      });
+
+      const newReport: Report = {
+        ...mapApiReport(created),
+        // Ensure client label from form if API doesn't return it
+        client: created.clientName ?? payload.clientLabel,
+        status: 'generating',
+      };
+      setReports((prev) => [newReport, ...prev]);
+      setDialogOpen(false);
+    } catch (err) {
+      console.error('[ReportsPage] Failed to generate report:', err);
+      // Add an optimistic entry with failed status so the user sees what happened
+      const fallback: Report = {
+        id: `optimistic-${Date.now()}`,
+        title: payload.title,
+        dateRange: `${payload.startDate} – ${payload.endDate}`,
+        type: payload.type,
+        status: 'failed',
+        createdAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        client: payload.clientLabel,
+      };
+      setReports((prev) => [fallback, ...prev]);
+      setDialogOpen(false);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -290,87 +418,126 @@ export default function ReportsPage(): React.JSX.Element {
             Generate and download analytics reports for your clients.
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4" />
+        <Button onClick={() => setDialogOpen(true)} disabled={loading}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Generate Report
         </Button>
       </div>
 
+      {/* Error state */}
+      {error !== null && (
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-500" aria-hidden="true" />
+          <span>{error}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-100"
+            onClick={() => void fetchReports()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-6 w-6 animate-spin text-slate-400" aria-label="Loading reports..." />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && reports.length === 0 && error === null && (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 py-16 text-center">
+          <FileBarChart className="h-10 w-10 text-slate-300" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium text-slate-600">No reports yet</p>
+          <p className="mt-1 text-xs text-slate-400">Generate your first report to get started.</p>
+          <Button className="mt-5" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Generate Report
+          </Button>
+        </div>
+      )}
+
       {/* Reports table */}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Title</TableHead>
-            <TableHead>Client</TableHead>
-            <TableHead>Date Range</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {reports.map((report) => (
-            <TableRow key={report.id}>
-              <TableCell className="max-w-xs">
-                <div className="flex items-center gap-2 min-w-0">
-                  <FileBarChart className="h-4 w-4 text-slate-400 shrink-0" aria-hidden="true" />
-                  <span className="truncate font-medium text-slate-800">{report.title}</span>
-                </div>
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-slate-500">
-                {report.client}
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-slate-500 text-xs">
-                {report.dateRange}
-              </TableCell>
-              <TableCell>
-                <Badge variant={TYPE_BADGE_VARIANT[report.type]}>
-                  {TYPE_LABEL[report.type]}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <StatusBadge status={report.status} />
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-slate-500 text-xs">
-                {report.createdAt}
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex items-center justify-end gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={report.status !== 'ready'}
-                    aria-label={`View ${report.title}`}
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                    View
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={report.status !== 'ready'}
-                    aria-label={`Download PDF for ${report.title}`}
-                    className={cn(
-                      report.status === 'ready'
-                        ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
-                        : ''
-                    )}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    PDF
-                  </Button>
-                </div>
-              </TableCell>
+      {!loading && reports.length > 0 && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Title</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Date Range</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {reports.map((report) => (
+              <TableRow key={report.id}>
+                <TableCell className="max-w-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileBarChart className="h-4 w-4 text-slate-400 shrink-0" aria-hidden="true" />
+                    <span className="truncate font-medium text-slate-800">{report.title}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-slate-500">
+                  {report.client}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-slate-500 text-xs">
+                  {report.dateRange}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={TYPE_BADGE_VARIANT[report.type]}>
+                    {TYPE_LABEL[report.type]}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <StatusBadge status={report.status} />
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-slate-500 text-xs">
+                  {report.createdAt}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={report.status !== 'ready'}
+                      aria-label={`View ${report.title}`}
+                    >
+                      <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                      View
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={report.status !== 'ready'}
+                      aria-label={`Download PDF for ${report.title}`}
+                      className={cn(
+                        report.status === 'ready'
+                          ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+                          : ''
+                      )}
+                    >
+                      <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                      PDF
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
       <GenerateReportDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onGenerate={handleGenerate}
+        submitting={submitting}
       />
     </div>
   );

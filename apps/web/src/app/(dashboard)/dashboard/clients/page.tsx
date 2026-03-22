@@ -11,6 +11,9 @@ import {
   Users,
   SlidersHorizontal,
   X,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -29,6 +32,7 @@ import {
 } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
 import { BulkToolbar } from '@/components/clients/bulk-toolbar';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,261 +63,112 @@ interface Client {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API response shapes
 // ---------------------------------------------------------------------------
 
-const MOCK_GROUPS: ClientGroup[] = [
-  { id: 'g1', name: 'Enterprise' },
-  { id: 'g2', name: 'Startup' },
-  { id: 'g3', name: 'E-commerce' },
-  { id: 'g4', name: 'Healthcare' },
-  { id: 'g5', name: 'SaaS' },
-  { id: 'g6', name: 'Agency' },
+interface ApiClient {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  company: string | null;
+  notes: string | null;
+  tags: string[];
+  groups: { id: string; name: string }[];
+  createdAt: string;
+}
+
+interface ApiGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const AVATAR_COLORS = [
+  'from-violet-500 to-purple-600',
+  'from-blue-500 to-cyan-600',
+  'from-emerald-500 to-teal-600',
+  'from-pink-500 to-rose-600',
+  'from-amber-500 to-orange-600',
+  'from-sky-500 to-blue-600',
+  'from-lime-500 to-green-600',
+  'from-fuchsia-500 to-pink-600',
 ];
 
-const MOCK_CLIENTS: Client[] = [
-  {
-    id: 'c1',
-    name: 'Acme Corporation',
-    email: 'contact@acme.com',
-    phone: '+1 (555) 100-0001',
-    company: 'Acme Corp',
-    notes: 'Long-standing enterprise client. Quarterly review scheduled.',
-    tags: [
-      { label: 'Enterprise', variant: 'purple' },
-      { label: 'VIP', variant: 'blue' },
-    ],
-    groups: [MOCK_GROUPS[0]!],
-    avatarInitials: 'AC',
-    avatarColor: 'from-violet-500 to-purple-600',
-    createdAt: '2024-01-15',
-  },
-  {
-    id: 'c2',
-    name: 'Bright Ideas Studio',
-    email: 'hello@brightideas.io',
-    phone: '+1 (555) 200-0002',
-    company: 'Bright Ideas Studio',
-    notes: 'Creative agency, monthly retainer.',
-    tags: [{ label: 'Agency', variant: 'green' }],
-    groups: [MOCK_GROUPS[5]!],
-    avatarInitials: 'BI',
-    avatarColor: 'from-emerald-500 to-teal-600',
-    createdAt: '2024-02-03',
-  },
-  {
-    id: 'c3',
-    name: 'CloudSync Systems',
-    email: 'ops@cloudsync.tech',
-    phone: '+1 (555) 300-0003',
-    company: 'CloudSync Systems',
-    notes: 'SaaS client, multi-platform social strategy.',
-    tags: [
-      { label: 'SaaS', variant: 'blue' },
-      { label: 'Tech', variant: 'default' },
-    ],
-    groups: [MOCK_GROUPS[4]!],
-    avatarInitials: 'CS',
-    avatarColor: 'from-blue-500 to-cyan-600',
-    createdAt: '2024-02-18',
-  },
-  {
-    id: 'c4',
-    name: 'Delta Health Partners',
-    email: 'social@deltahealth.com',
-    phone: '+1 (555) 400-0004',
-    company: 'Delta Health Partners',
-    notes: 'Healthcare compliance requirements apply.',
-    tags: [
-      { label: 'Healthcare', variant: 'green' },
-      { label: 'Regulated', variant: 'red' },
-    ],
-    groups: [MOCK_GROUPS[3]!],
-    avatarInitials: 'DH',
-    avatarColor: 'from-green-500 to-emerald-600',
-    createdAt: '2024-03-05',
-  },
-  {
-    id: 'c5',
-    name: 'Echo Commerce',
-    email: 'marketing@echocommerce.shop',
-    phone: '+1 (555) 500-0005',
-    company: 'Echo Commerce',
-    notes: 'High-volume e-commerce, seasonal campaigns.',
-    tags: [
-      { label: 'E-commerce', variant: 'purple' },
-      { label: 'Seasonal', variant: 'default' },
-    ],
-    groups: [MOCK_GROUPS[2]!],
-    avatarInitials: 'EC',
-    avatarColor: 'from-pink-500 to-rose-600',
-    createdAt: '2024-03-20',
-  },
-  {
-    id: 'c6',
-    name: 'Founders Launchpad',
-    email: 'team@founderslaunchpad.co',
-    phone: '+1 (555) 600-0006',
-    company: 'Founders Launchpad',
-    notes: 'Startup accelerator, multiple portfolio brands.',
-    tags: [
-      { label: 'Startup', variant: 'blue' },
-      { label: 'High Growth', variant: 'green' },
-    ],
-    groups: [MOCK_GROUPS[1]!],
-    avatarInitials: 'FL',
-    avatarColor: 'from-amber-500 to-orange-600',
-    createdAt: '2024-04-11',
-  },
-  {
-    id: 'c7',
-    name: 'Greenleaf Organics',
-    email: 'hello@greenleaforganics.com',
-    phone: '+1 (555) 700-0007',
-    company: 'Greenleaf Organics',
-    notes: 'D2C organic food brand, influencer focus.',
-    tags: [
-      { label: 'E-commerce', variant: 'purple' },
-      { label: 'D2C', variant: 'default' },
-    ],
-    groups: [MOCK_GROUPS[2]!],
-    avatarInitials: 'GO',
-    avatarColor: 'from-lime-500 to-green-600',
-    createdAt: '2024-04-22',
-  },
-  {
-    id: 'c8',
-    name: 'Harbor Analytics',
-    email: 'growth@harboranalytics.ai',
-    phone: '+1 (555) 800-0008',
-    company: 'Harbor Analytics',
-    notes: 'AI analytics platform, growth-phase startup.',
-    tags: [
-      { label: 'SaaS', variant: 'blue' },
-      { label: 'AI', variant: 'purple' },
-    ],
-    groups: [MOCK_GROUPS[4]!, MOCK_GROUPS[1]!],
-    avatarInitials: 'HA',
-    avatarColor: 'from-sky-500 to-blue-600',
-    createdAt: '2024-05-08',
-  },
-  {
-    id: 'c9',
-    name: 'Ironclad Legal',
-    email: 'pr@ironcladlegal.com',
-    phone: '+1 (555) 900-0009',
-    company: 'Ironclad Legal',
-    notes: 'Law firm, limited content scope, approval required.',
-    tags: [
-      { label: 'Enterprise', variant: 'purple' },
-      { label: 'Approval Flow', variant: 'red' },
-    ],
-    groups: [MOCK_GROUPS[0]!],
-    avatarInitials: 'IL',
-    avatarColor: 'from-slate-500 to-gray-600',
-    createdAt: '2024-05-30',
-  },
-  {
-    id: 'c10',
-    name: 'Jasmine Beauty Co.',
-    email: 'social@jasminebeauty.com',
-    phone: '+1 (555) 100-0010',
-    company: 'Jasmine Beauty Co.',
-    notes: 'Beauty brand, UGC and influencer campaigns.',
-    tags: [
-      { label: 'E-commerce', variant: 'purple' },
-      { label: 'Influencer', variant: 'blue' },
-    ],
-    groups: [MOCK_GROUPS[2]!],
-    avatarInitials: 'JB',
-    avatarColor: 'from-fuchsia-500 to-pink-600',
-    createdAt: '2024-06-14',
-  },
-  {
-    id: 'c11',
-    name: 'Keystone Realty',
-    email: 'marketing@keystonerealty.com',
-    phone: '+1 (555) 110-0011',
-    company: 'Keystone Realty',
-    notes: 'Regional real-estate group, listing promotions.',
-    tags: [{ label: 'Real Estate', variant: 'green' }],
-    groups: [],
-    avatarInitials: 'KR',
-    avatarColor: 'from-teal-500 to-cyan-600',
-    createdAt: '2024-07-01',
-  },
-  {
-    id: 'c12',
-    name: 'Luminary Fintech',
-    email: 'content@luminaryfintech.io',
-    phone: '+1 (555) 120-0012',
-    company: 'Luminary Fintech',
-    notes: 'Fintech startup, compliance-sensitive content.',
-    tags: [
-      { label: 'Startup', variant: 'blue' },
-      { label: 'Fintech', variant: 'default' },
-      { label: 'Regulated', variant: 'red' },
-    ],
-    groups: [MOCK_GROUPS[1]!, MOCK_GROUPS[4]!],
-    avatarInitials: 'LF',
-    avatarColor: 'from-indigo-500 to-violet-600',
-    createdAt: '2024-07-19',
-  },
-  {
-    id: 'c13',
-    name: 'Metro Event Group',
-    email: 'social@metroeventgroup.com',
-    phone: '+1 (555) 130-0013',
-    company: 'Metro Event Group',
-    notes: 'Event management, heavy seasonal scheduling.',
-    tags: [
-      { label: 'Events', variant: 'green' },
-      { label: 'Seasonal', variant: 'default' },
-    ],
-    groups: [MOCK_GROUPS[5]!],
-    avatarInitials: 'ME',
-    avatarColor: 'from-orange-500 to-red-600',
-    createdAt: '2024-08-05',
-  },
-  {
-    id: 'c14',
-    name: 'NorthWave Software',
-    email: 'brand@northwave.dev',
-    phone: '+1 (555) 140-0014',
-    company: 'NorthWave Software',
-    notes: 'Developer tools company, technical content.',
-    tags: [
-      { label: 'SaaS', variant: 'blue' },
-      { label: 'Developer', variant: 'default' },
-    ],
-    groups: [MOCK_GROUPS[4]!],
-    avatarInitials: 'NW',
-    avatarColor: 'from-cyan-500 to-sky-600',
-    createdAt: '2024-08-28',
-  },
-  {
-    id: 'c15',
-    name: 'Olympus Fitness',
-    email: 'marketing@olympusfitness.com',
-    phone: '+1 (555) 150-0015',
-    company: 'Olympus Fitness',
-    notes: 'Gym chain, local campaigns per location.',
-    tags: [
-      { label: 'Fitness', variant: 'green' },
-      { label: 'Multi-location', variant: 'purple' },
-    ],
-    groups: [MOCK_GROUPS[2]!],
-    avatarInitials: 'OF',
-    avatarColor: 'from-yellow-500 to-amber-600',
-    createdAt: '2024-09-10',
-  },
-];
+function getAvatarColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) & 0xffffffff;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
+}
 
-const ALL_GROUPS_OPTION = { value: '', label: 'All Groups' };
-const GROUP_FILTER_OPTIONS = [
-  ALL_GROUPS_OPTION,
-  ...MOCK_GROUPS.map((g) => ({ value: g.id, label: g.name })),
-];
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join('');
+}
+
+function mapApiClient(a: ApiClient): Client {
+  return {
+    id: a.id,
+    name: a.name,
+    email: a.email,
+    phone: a.phone ?? '',
+    company: a.company ?? '',
+    notes: a.notes ?? '',
+    tags: a.tags.map((label) => ({ label, variant: 'default' as const })),
+    groups: a.groups.map((g) => ({ id: g.id, name: g.name })),
+    avatarInitials: getInitials(a.name),
+    avatarColor: getAvatarColor(a.id),
+    createdAt: a.createdAt.slice(0, 10),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+function Toast({
+  message,
+  type,
+  onClose,
+}: {
+  message: string;
+  type: 'success' | 'error';
+  onClose: () => void;
+}): React.JSX.Element {
+  React.useEffect(() => {
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div
+      className={cn(
+        'fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg',
+        type === 'success'
+          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+          : 'bg-red-50 text-red-800 border border-red-200'
+      )}
+    >
+      {type === 'success' ? (
+        <CheckCircle2 className="h-4 w-4" />
+      ) : (
+        <AlertCircle className="h-4 w-4" />
+      )}
+      {message}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Create Client form fields type
@@ -378,7 +233,6 @@ function RowActions({
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   React.useEffect(() => {
     function handleClick(e: MouseEvent): void {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -405,7 +259,7 @@ function RowActions({
       {open && (
         <div className="absolute right-0 top-full mt-1 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/10">
           <Link
-            href={`/clients/${clientId}`}
+            href={`/dashboard/clients/${clientId}`}
             className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
             onClick={() => setOpen(false)}
           >
@@ -435,7 +289,13 @@ function RowActions({
 
 export default function ClientsPage(): React.JSX.Element {
   // ── Data state ────────────────────────────────────────────────────────────
-  const [clients, setClients] = React.useState<Client[]>(MOCK_CLIENTS);
+  const [clients, setClients] = React.useState<Client[]>([]);
+  const [groups, setGroups] = React.useState<ClientGroup[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [search, setSearch] = React.useState('');
@@ -453,6 +313,36 @@ export default function ClientsPage(): React.JSX.Element {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [deleteTargetId, setDeleteTargetId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<CreateClientForm>(EMPTY_FORM);
+
+  // ── Fetch clients ─────────────────────────────────────────────────────────
+  const fetchClients = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await apiClient.get<ApiClient[]>('/clients');
+      setClients(data.map(mapApiClient));
+    } catch (err) {
+      console.error('Failed to fetch clients:', err);
+      setError('Failed to load clients. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ── Fetch groups for filter dropdown ─────────────────────────────────────
+  const fetchGroups = React.useCallback(async () => {
+    try {
+      const data = await apiClient.get<ApiGroup[]>('/clients/groups');
+      setGroups(data.map((g) => ({ id: g.id, name: g.name })));
+    } catch (err) {
+      console.error('Failed to fetch groups:', err);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchClients();
+    void fetchGroups();
+  }, [fetchClients, fetchGroups]);
 
   // ── Derived: filtered list ────────────────────────────────────────────────
   const filtered = React.useMemo(() => {
@@ -517,113 +407,164 @@ export default function ClientsPage(): React.JSX.Element {
   }
 
   // ── CRUD helpers ──────────────────────────────────────────────────────────
-  function handleCreateClient(): void {
+  async function handleCreateClient(): Promise<void> {
     if (!form.name.trim() || !form.email.trim()) return;
+    setSaving(true);
+    try {
+      const tags = form.tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
 
-    const tags: ClientTag[] = form.tags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map((label) => ({ label, variant: 'default' as const }));
+      const created = await apiClient.post<ApiClient>('/clients', {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim() || undefined,
+        company: form.company.trim() || undefined,
+        notes: form.notes.trim() || undefined,
+        tags: tags.length > 0 ? tags : undefined,
+      });
 
-    const initials = form.name
-      .split(' ')
-      .slice(0, 2)
-      .map((w) => w.charAt(0).toUpperCase())
-      .join('');
-
-    const colors = [
-      'from-violet-500 to-purple-600',
-      'from-blue-500 to-cyan-600',
-      'from-emerald-500 to-teal-600',
-      'from-pink-500 to-rose-600',
-      'from-amber-500 to-orange-600',
-    ];
-    const avatarColor = colors[clients.length % colors.length] ?? colors[0]!;
-
-    const newClient: Client = {
-      id: `c${Date.now()}`,
-      name: form.name.trim(),
-      email: form.email.trim(),
-      phone: form.phone.trim(),
-      company: form.company.trim(),
-      notes: form.notes.trim(),
-      tags,
-      groups: [],
-      avatarInitials: initials,
-      avatarColor,
-      createdAt: new Date().toISOString().slice(0, 10),
-    };
-
-    setClients((prev) => [newClient, ...prev]);
-    setCreateOpen(false);
-    setForm(EMPTY_FORM);
+      setClients((prev) => [mapApiClient(created), ...prev]);
+      setCreateOpen(false);
+      setForm(EMPTY_FORM);
+      setToast({ message: 'Client created successfully', type: 'success' });
+    } catch (err) {
+      console.error('Failed to create client:', err);
+      setToast({ message: 'Failed to create client. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleDeleteClient(id: string): void {
-    setClients((prev) => prev.filter((c) => c.id !== id));
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    setDeleteTargetId(null);
+  async function handleDeleteClient(id: string): Promise<void> {
+    setDeleting(true);
+    try {
+      await apiClient.delete(`/clients/${id}`);
+      setClients((prev) => prev.filter((c) => c.id !== id));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setDeleteTargetId(null);
+      setToast({ message: 'Client deleted', type: 'success' });
+    } catch (err) {
+      console.error('Failed to delete client:', err);
+      setToast({ message: 'Failed to delete client. Please try again.', type: 'error' });
+      setDeleteTargetId(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   // ── Bulk action handlers ──────────────────────────────────────────────────
-  function handleBulkDelete(): void {
-    setClients((prev) => prev.filter((c) => !selectedIds.has(c.id)));
-    setSelectedIds(new Set());
+  async function handleBulkDelete(): Promise<void> {
+    try {
+      const ids = Array.from(selectedIds);
+      await apiClient.post('/clients/bulk', { operation: 'delete', clientIds: ids });
+      setClients((prev) => prev.filter((c) => !selectedIds.has(c.id)));
+      setSelectedIds(new Set());
+      setToast({ message: `${ids.length} client${ids.length > 1 ? 's' : ''} deleted`, type: 'success' });
+    } catch (err) {
+      console.error('Failed to bulk delete:', err);
+      setToast({ message: 'Bulk delete failed. Please try again.', type: 'error' });
+    }
   }
 
-  function handleBulkAddToGroup(groupId: string): void {
-    const group = MOCK_GROUPS.find((g) => g.id === groupId);
-    if (!group) return;
-    setClients((prev) =>
-      prev.map((c) => {
-        if (!selectedIds.has(c.id)) return c;
-        if (c.groups.some((g) => g.id === groupId)) return c;
-        return { ...c, groups: [...c.groups, group] };
-      })
-    );
+  async function handleBulkAddToGroup(groupId: string): Promise<void> {
+    try {
+      const ids = Array.from(selectedIds);
+      await apiClient.post(`/clients/groups/${groupId}/members`, { clientIds: ids });
+      const group = groups.find((g) => g.id === groupId);
+      if (group) {
+        setClients((prev) =>
+          prev.map((c) => {
+            if (!selectedIds.has(c.id)) return c;
+            if (c.groups.some((g) => g.id === groupId)) return c;
+            return { ...c, groups: [...c.groups, group] };
+          })
+        );
+      }
+      setToast({ message: 'Clients added to group', type: 'success' });
+    } catch (err) {
+      console.error('Failed to add to group:', err);
+      setToast({ message: 'Failed to add to group. Please try again.', type: 'error' });
+    }
   }
 
-  function handleBulkRemoveFromGroup(groupId: string): void {
-    setClients((prev) =>
-      prev.map((c) => {
-        if (!selectedIds.has(c.id)) return c;
-        return { ...c, groups: c.groups.filter((g) => g.id !== groupId) };
-      })
-    );
+  async function handleBulkRemoveFromGroup(groupId: string): Promise<void> {
+    try {
+      const ids = Array.from(selectedIds);
+      await apiClient.delete(`/clients/groups/${groupId}/members`, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientIds: ids }) as unknown as BodyInit,
+      } as RequestInit);
+      setClients((prev) =>
+        prev.map((c) => {
+          if (!selectedIds.has(c.id)) return c;
+          return { ...c, groups: c.groups.filter((g) => g.id !== groupId) };
+        })
+      );
+      setToast({ message: 'Clients removed from group', type: 'success' });
+    } catch (err) {
+      console.error('Failed to remove from group:', err);
+      setToast({ message: 'Failed to remove from group. Please try again.', type: 'error' });
+    }
   }
 
   function handleBulkAddTags(tags: string[]): void {
-    setClients((prev) =>
-      prev.map((c) => {
-        if (!selectedIds.has(c.id)) return c;
-        const existingLabels = new Set(c.tags.map((t) => t.label.toLowerCase()));
-        const newTags: ClientTag[] = tags
-          .filter((t) => !existingLabels.has(t.toLowerCase()))
-          .map((label) => ({ label, variant: 'default' as const }));
-        return { ...c, tags: [...c.tags, ...newTags] };
-      })
-    );
+    // Optimistic local update — backend bulk tag update via POST /clients/bulk
+    void (async () => {
+      try {
+        const ids = Array.from(selectedIds);
+        await apiClient.post('/clients/bulk', { operation: 'add_tags', clientIds: ids, tags });
+        setClients((prev) =>
+          prev.map((c) => {
+            if (!selectedIds.has(c.id)) return c;
+            const existingLabels = new Set(c.tags.map((t) => t.label.toLowerCase()));
+            const newTags: ClientTag[] = tags
+              .filter((t) => !existingLabels.has(t.toLowerCase()))
+              .map((label) => ({ label, variant: 'default' as const }));
+            return { ...c, tags: [...c.tags, ...newTags] };
+          })
+        );
+        setToast({ message: 'Tags added', type: 'success' });
+      } catch (err) {
+        console.error('Failed to add tags:', err);
+        setToast({ message: 'Failed to add tags. Please try again.', type: 'error' });
+      }
+    })();
   }
+
+  // ── Group filter options ──────────────────────────────────────────────────
+  const groupFilterOptions = React.useMemo(() => [
+    { value: '', label: 'All Groups' },
+    ...groups.map((g) => ({ value: g.id, label: g.name })),
+  ], [groups]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <div className="space-y-6">
         {/* Page header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Clients</h1>
             <p className="mt-0.5 text-sm text-slate-500">
-              {clients.length} total clients
+              {loading ? 'Loading clients...' : `${clients.length} total client${clients.length !== 1 ? 's' : ''}`}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/clients/groups">
+            <Link href="/dashboard/clients/groups">
               <Button variant="outline" size="sm" className="gap-1.5">
                 <Users className="h-4 w-4" />
                 Groups
@@ -635,6 +576,21 @@ export default function ClientsPage(): React.JSX.Element {
             </Button>
           </div>
         </div>
+
+        {/* Error state */}
+        {error && (
+          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+            <button
+              type="button"
+              onClick={() => void fetchClients()}
+              className="ml-auto text-xs underline hover:no-underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Filters row */}
         <div className="flex flex-wrap items-end gap-3">
@@ -670,7 +626,7 @@ export default function ClientsPage(): React.JSX.Element {
               placeholder="All Groups"
               value={groupFilter}
               onChange={(e) => setGroupFilter(e.target.value)}
-              options={GROUP_FILTER_OPTIONS}
+              options={groupFilterOptions}
               aria-label="Filter by group"
             />
           </div>
@@ -720,153 +676,161 @@ export default function ClientsPage(): React.JSX.Element {
 
         {/* Table */}
         <div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={allOnPageSelected}
-                    indeterminate={!allOnPageSelected && someOnPageSelected}
-                    onChange={toggleSelectAll}
-                    aria-label="Select all on page"
-                  />
-                </TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead className="hidden sm:table-cell">Email</TableHead>
-                <TableHead className="hidden md:table-cell">Company</TableHead>
-                <TableHead className="hidden lg:table-cell">Tags</TableHead>
-                <TableHead className="hidden xl:table-cell">Groups</TableHead>
-                <TableHead className="w-12" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginated.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-16 text-center text-slate-400"
-                  >
-                    {search || groupFilter || tagFilter
-                      ? 'No clients match your filters.'
-                      : 'No clients yet. Create your first client to get started.'}
-                  </TableCell>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allOnPageSelected}
+                      indeterminate={!allOnPageSelected && someOnPageSelected}
+                      onChange={toggleSelectAll}
+                      aria-label="Select all on page"
+                    />
+                  </TableHead>
+                  <TableHead>Client</TableHead>
+                  <TableHead className="hidden sm:table-cell">Email</TableHead>
+                  <TableHead className="hidden md:table-cell">Company</TableHead>
+                  <TableHead className="hidden lg:table-cell">Tags</TableHead>
+                  <TableHead className="hidden xl:table-cell">Groups</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
-              ) : (
-                paginated.map((client) => (
-                  <TableRow
-                    key={client.id}
-                    selected={selectedIds.has(client.id)}
-                  >
-                    {/* Checkbox */}
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedIds.has(client.id)}
-                        onChange={() => toggleSelectRow(client.id)}
-                        aria-label={`Select ${client.name}`}
-                      />
-                    </TableCell>
-
-                    {/* Name + avatar */}
-                    <TableCell>
-                      <Link
-                        href={`/clients/${client.id}`}
-                        className="flex items-center gap-3 group"
-                      >
-                        <ClientAvatar
-                          initials={client.avatarInitials}
-                          colorClass={client.avatarColor}
-                        />
-                        <div className="min-w-0">
-                          <p className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors truncate">
-                            {client.name}
-                          </p>
-                          <p className="text-xs text-slate-500 sm:hidden truncate">
-                            {client.email}
-                          </p>
-                        </div>
-                      </Link>
-                    </TableCell>
-
-                    {/* Email */}
-                    <TableCell className="hidden sm:table-cell text-slate-500">
-                      {client.email}
-                    </TableCell>
-
-                    {/* Company */}
-                    <TableCell className="hidden md:table-cell text-slate-600">
-                      {client.company || (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </TableCell>
-
-                    {/* Tags */}
-                    <TableCell className="hidden lg:table-cell">
-                      <div className="flex flex-wrap gap-1">
-                        {client.tags.slice(0, 3).map((tag) => (
-                          <Badge
-                            key={tag.label}
-                            variant={tag.variant}
-                            className="text-[11px]"
-                          >
-                            {tag.label}
-                          </Badge>
-                        ))}
-                        {client.tags.length > 3 && (
-                          <Badge variant="gray" className="text-[11px]">
-                            +{client.tags.length - 3}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-
-                    {/* Groups */}
-                    <TableCell className="hidden xl:table-cell">
-                      <div className="flex flex-wrap gap-1">
-                        {client.groups.length === 0 ? (
-                          <span className="text-slate-300 text-xs">—</span>
-                        ) : (
-                          client.groups.slice(0, 2).map((g) => (
-                            <Badge
-                              key={g.id}
-                              variant="blue"
-                              className="text-[11px]"
-                            >
-                              {g.name}
-                            </Badge>
-                          ))
-                        )}
-                        {client.groups.length > 2 && (
-                          <Badge variant="gray" className="text-[11px]">
-                            +{client.groups.length - 2}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-
-                    {/* Actions */}
-                    <TableCell>
-                      <RowActions
-                        clientId={client.id}
-                        onDelete={(id) => setDeleteTargetId(id)}
-                      />
+              </TableHeader>
+              <TableBody>
+                {paginated.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={7}
+                      className="py-16 text-center text-slate-400"
+                    >
+                      {search || groupFilter || tagFilter
+                        ? 'No clients match your filters.'
+                        : 'No clients yet. Create your first client to get started.'}
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  paginated.map((client) => (
+                    <TableRow
+                      key={client.id}
+                      selected={selectedIds.has(client.id)}
+                    >
+                      {/* Checkbox */}
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedIds.has(client.id)}
+                          onChange={() => toggleSelectRow(client.id)}
+                          aria-label={`Select ${client.name}`}
+                        />
+                      </TableCell>
+
+                      {/* Name + avatar */}
+                      <TableCell>
+                        <Link
+                          href={`/dashboard/clients/${client.id}`}
+                          className="flex items-center gap-3 group"
+                        >
+                          <ClientAvatar
+                            initials={client.avatarInitials}
+                            colorClass={client.avatarColor}
+                          />
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                              {client.name}
+                            </p>
+                            <p className="text-xs text-slate-500 sm:hidden truncate">
+                              {client.email}
+                            </p>
+                          </div>
+                        </Link>
+                      </TableCell>
+
+                      {/* Email */}
+                      <TableCell className="hidden sm:table-cell text-slate-500">
+                        {client.email}
+                      </TableCell>
+
+                      {/* Company */}
+                      <TableCell className="hidden md:table-cell text-slate-600">
+                        {client.company || (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </TableCell>
+
+                      {/* Tags */}
+                      <TableCell className="hidden lg:table-cell">
+                        <div className="flex flex-wrap gap-1">
+                          {client.tags.slice(0, 3).map((tag) => (
+                            <Badge
+                              key={tag.label}
+                              variant={tag.variant}
+                              className="text-[11px]"
+                            >
+                              {tag.label}
+                            </Badge>
+                          ))}
+                          {client.tags.length > 3 && (
+                            <Badge variant="gray" className="text-[11px]">
+                              +{client.tags.length - 3}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      {/* Groups */}
+                      <TableCell className="hidden xl:table-cell">
+                        <div className="flex flex-wrap gap-1">
+                          {client.groups.length === 0 ? (
+                            <span className="text-slate-300 text-xs">—</span>
+                          ) : (
+                            client.groups.slice(0, 2).map((g) => (
+                              <Badge
+                                key={g.id}
+                                variant="blue"
+                                className="text-[11px]"
+                              >
+                                {g.name}
+                              </Badge>
+                            ))
+                          )}
+                          {client.groups.length > 2 && (
+                            <Badge variant="gray" className="text-[11px]">
+                              +{client.groups.length - 2}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      {/* Actions */}
+                      <TableCell>
+                        <RowActions
+                          clientId={client.id}
+                          onDelete={(id) => setDeleteTargetId(id)}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
 
           {/* Pagination */}
-          <Pagination
-            total={filtered.length}
-            page={page}
-            pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
-              setPageSize(size);
-              setPage(1);
-            }}
-          />
+          {!loading && (
+            <Pagination
+              total={filtered.length}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -951,10 +915,17 @@ export default function ClientsPage(): React.JSX.Element {
               Cancel
             </Button>
             <Button
-              onClick={handleCreateClient}
-              disabled={!form.name.trim() || !form.email.trim()}
+              onClick={() => void handleCreateClient()}
+              disabled={!form.name.trim() || !form.email.trim() || saving}
             >
-              Create Client
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Client'
+              )}
             </Button>
           </DialogFooter>
         </div>
@@ -975,11 +946,19 @@ export default function ClientsPage(): React.JSX.Element {
           </Button>
           <Button
             variant="destructive"
+            disabled={deleting}
             onClick={() => {
-              if (deleteTargetId) handleDeleteClient(deleteTargetId);
+              if (deleteTargetId) void handleDeleteClient(deleteTargetId);
             }}
           >
-            Delete Client
+            {deleting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete Client'
+            )}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -989,10 +968,10 @@ export default function ClientsPage(): React.JSX.Element {
       {/* ------------------------------------------------------------------- */}
       <BulkToolbar
         selectedCount={selectedIds.size}
-        groups={MOCK_GROUPS}
-        onDelete={handleBulkDelete}
-        onAddToGroup={handleBulkAddToGroup}
-        onRemoveFromGroup={handleBulkRemoveFromGroup}
+        groups={groups}
+        onDelete={() => void handleBulkDelete()}
+        onAddToGroup={(groupId) => void handleBulkAddToGroup(groupId)}
+        onRemoveFromGroup={(groupId) => void handleBulkRemoveFromGroup(groupId)}
         onAddTags={handleBulkAddTags}
         onClearSelection={() => setSelectedIds(new Set())}
       />

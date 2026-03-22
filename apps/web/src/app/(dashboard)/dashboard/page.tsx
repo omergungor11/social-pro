@@ -1,5 +1,7 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+'use client';
+
+import * as React from 'react';
+import Link from 'next/link';
 import {
   Users,
   Share2,
@@ -11,13 +13,11 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowRight,
-} from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-
-export const metadata: Metadata = {
-  title: "Dashboard",
-};
+  Loader2,
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,7 +27,7 @@ interface StatCard {
   label: string;
   value: string;
   change: string;
-  trend: "up" | "down" | "neutral";
+  trend: 'up' | 'down' | 'neutral';
   icon: React.ElementType;
   iconColor: string;
   iconBg: string;
@@ -43,72 +43,68 @@ interface QuickAction {
 }
 
 // ---------------------------------------------------------------------------
-// Data
+// API response types
 // ---------------------------------------------------------------------------
 
-const STAT_CARDS: StatCard[] = [
-  {
-    label: "Total Clients",
-    value: "24",
-    change: "+3 this month",
-    trend: "up",
-    icon: Users,
-    iconColor: "text-blue-600",
-    iconBg: "bg-blue-50",
-  },
-  {
-    label: "Social Accounts",
-    value: "87",
-    change: "+12 this month",
-    trend: "up",
-    icon: Share2,
-    iconColor: "text-violet-600",
-    iconBg: "bg-violet-50",
-  },
-  {
-    label: "Scheduled Posts",
-    value: "142",
-    change: "-8 from last week",
-    trend: "down",
-    icon: CalendarClock,
-    iconColor: "text-amber-600",
-    iconBg: "bg-amber-50",
-  },
-  {
-    label: "AI Credits Used",
-    value: "3,840",
-    change: "1,160 remaining",
-    trend: "neutral",
-    icon: Sparkles,
-    iconColor: "text-emerald-600",
-    iconBg: "bg-emerald-50",
-  },
-];
+interface ApiClientsResponse {
+  total?: number;
+  count?: number;
+  items?: unknown[];
+}
+
+interface ApiPostsResponse {
+  total?: number;
+  count?: number;
+  items?: unknown[];
+}
+
+interface ApiSocialAccountsResponse {
+  total?: number;
+  count?: number;
+  items?: unknown[];
+}
+
+interface ApiUsageResponse {
+  aiCredits?: { current?: number; used?: number; limit?: number; max?: number };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getCount(data: { total?: number; count?: number; items?: unknown[] } | null): number {
+  if (data === null) return 0;
+  return data.total ?? data.count ?? data.items?.length ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Static data
+// ---------------------------------------------------------------------------
 
 const QUICK_ACTIONS: QuickAction[] = [
   {
-    label: "Create Post",
-    description: "Schedule content for any social platform",
-    href: "/dashboard/posts/new",
+    label: 'Create Post',
+    description: 'Schedule content for any social platform',
+    href: '/dashboard/posts/new',
     icon: PlusCircle,
-    iconColor: "text-blue-600",
-    iconBg: "bg-blue-50",
+    iconColor: 'text-blue-600',
+    iconBg: 'bg-blue-50',
   },
   {
-    label: "Add Client",
-    description: "Onboard a new agency client",
-    href: "/dashboard/clients/new",
+    label: 'Add Client',
+    description: 'Onboard a new agency client',
+    href: '/dashboard/clients/new',
     icon: UserPlus,
-    iconColor: "text-violet-600",
-    iconBg: "bg-violet-50",
+    iconColor: 'text-violet-600',
+    iconBg: 'bg-violet-50',
   },
   {
-    label: "Connect Account",
-    description: "Link a new social media profile",
-    href: "/dashboard/social-accounts/connect",
+    label: 'Connect Account',
+    description: 'Link a new social media profile',
+    href: '/dashboard/social-accounts/connect',
     icon: Link2,
-    iconColor: "text-emerald-600",
-    iconBg: "bg-emerald-50",
+    iconColor: 'text-emerald-600',
+    iconBg: 'bg-emerald-50',
   },
 ];
 
@@ -119,9 +115,9 @@ const QUICK_ACTIONS: QuickAction[] = [
 function StatCardItem({ card }: { card: StatCard }): React.JSX.Element {
   const Icon = card.icon;
   const TrendIcon =
-    card.trend === "up"
+    card.trend === 'up'
       ? TrendingUp
-      : card.trend === "down"
+      : card.trend === 'down'
       ? TrendingDown
       : null;
 
@@ -140,18 +136,18 @@ function StatCardItem({ card }: { card: StatCard }): React.JSX.Element {
               {TrendIcon !== null && (
                 <TrendIcon
                   className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    card.trend === "up" ? "text-emerald-500" : "text-red-500"
+                    'h-3.5 w-3.5 shrink-0',
+                    card.trend === 'up' ? 'text-emerald-500' : 'text-red-500'
                   )}
                   aria-hidden="true"
                 />
               )}
               <p
                 className={cn(
-                  "text-xs font-medium",
-                  card.trend === "up" && "text-emerald-600",
-                  card.trend === "down" && "text-red-500",
-                  card.trend === "neutral" && "text-slate-500"
+                  'text-xs font-medium',
+                  card.trend === 'up' && 'text-emerald-600',
+                  card.trend === 'down' && 'text-red-500',
+                  card.trend === 'neutral' && 'text-slate-500'
                 )}
               >
                 {card.change}
@@ -161,11 +157,11 @@ function StatCardItem({ card }: { card: StatCard }): React.JSX.Element {
 
           <div
             className={cn(
-              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+              'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl',
               card.iconBg
             )}
           >
-            <Icon className={cn("h-5 w-5", card.iconColor)} aria-hidden="true" />
+            <Icon className={cn('h-5 w-5', card.iconColor)} aria-hidden="true" />
           </div>
         </div>
       </CardContent>
@@ -187,12 +183,12 @@ function QuickActionCard({
     >
       <div
         className={cn(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform duration-150 group-hover:scale-105",
+          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform duration-150 group-hover:scale-105',
           action.iconBg
         )}
       >
         <Icon
-          className={cn("h-5 w-5", action.iconColor)}
+          className={cn('h-5 w-5', action.iconColor)}
           aria-hidden="true"
         />
       </div>
@@ -217,12 +213,90 @@ function QuickActionCard({
 // ---------------------------------------------------------------------------
 
 export default function DashboardPage(): React.JSX.Element {
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
+  const [statsLoading, setStatsLoading] = React.useState(false);
+  const [statCards, setStatCards] = React.useState<StatCard[]>([]);
+
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
   });
+
+  const fetchStats = React.useCallback(async (): Promise<void> => {
+    setStatsLoading(true);
+    try {
+      const [clientsData, postsData, socialAccountsData, usageData] = await Promise.all([
+        apiClient.get<ApiClientsResponse>('/clients').catch(() => null),
+        apiClient.get<ApiPostsResponse>('/posts?status=scheduled&limit=1').catch(() => null),
+        apiClient.get<ApiSocialAccountsResponse>('/social-accounts').catch(() => null),
+        apiClient.get<ApiUsageResponse>('/billing/usage').catch(() => null),
+      ]);
+
+      const totalClients = getCount(clientsData);
+      const scheduledPosts = getCount(postsData);
+      const socialAccounts = getCount(socialAccountsData);
+      const aiCreditsUsed = usageData?.aiCredits?.current ?? usageData?.aiCredits?.used ?? 0;
+      const aiCreditsMax = usageData?.aiCredits?.max ?? usageData?.aiCredits?.limit ?? 0;
+      const aiCreditsRemaining = aiCreditsMax > 0 ? aiCreditsMax - aiCreditsUsed : 0;
+
+      const cards: StatCard[] = [
+        {
+          label: 'Total Clients',
+          value: totalClients.toString(),
+          change: 'across your agency',
+          trend: 'neutral',
+          icon: Users,
+          iconColor: 'text-blue-600',
+          iconBg: 'bg-blue-50',
+        },
+        {
+          label: 'Social Accounts',
+          value: socialAccounts.toString(),
+          change: 'connected accounts',
+          trend: 'neutral',
+          icon: Share2,
+          iconColor: 'text-violet-600',
+          iconBg: 'bg-violet-50',
+        },
+        {
+          label: 'Scheduled Posts',
+          value: scheduledPosts.toString(),
+          change: 'queued for publishing',
+          trend: scheduledPosts > 0 ? 'up' : 'neutral',
+          icon: CalendarClock,
+          iconColor: 'text-amber-600',
+          iconBg: 'bg-amber-50',
+        },
+        {
+          label: 'AI Credits Used',
+          value: aiCreditsUsed.toLocaleString(),
+          change: aiCreditsRemaining > 0 ? `${aiCreditsRemaining.toLocaleString()} remaining` : 'check billing for limits',
+          trend: 'neutral',
+          icon: Sparkles,
+          iconColor: 'text-emerald-600',
+          iconBg: 'bg-emerald-50',
+        },
+      ];
+
+      setStatCards(cards);
+    } catch (err) {
+      console.error('[DashboardPage] Failed to fetch stats:', err);
+      // Show zeros gracefully — don't crash
+      setStatCards([
+        { label: 'Total Clients', value: '—', change: 'unavailable', trend: 'neutral', icon: Users, iconColor: 'text-blue-600', iconBg: 'bg-blue-50' },
+        { label: 'Social Accounts', value: '—', change: 'unavailable', trend: 'neutral', icon: Share2, iconColor: 'text-violet-600', iconBg: 'bg-violet-50' },
+        { label: 'Scheduled Posts', value: '—', change: 'unavailable', trend: 'neutral', icon: CalendarClock, iconColor: 'text-amber-600', iconBg: 'bg-amber-50' },
+        { label: 'AI Credits Used', value: '—', change: 'unavailable', trend: 'neutral', icon: Sparkles, iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50' },
+      ]);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchStats();
+  }, [fetchStats]);
 
   return (
     <div className="space-y-8">
@@ -236,11 +310,17 @@ export default function DashboardPage(): React.JSX.Element {
 
       {/* Stat cards */}
       <section aria-label="Key metrics">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {STAT_CARDS.map((card) => (
-            <StatCardItem key={card.label} card={card} />
-          ))}
-        </div>
+        {statsLoading ? (
+          <div className="flex items-center justify-center py-10">
+            <Loader2 className="h-5 w-5 animate-spin text-slate-400" aria-label="Loading stats..." />
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {statCards.map((card) => (
+              <StatCardItem key={card.label} card={card} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Quick actions + recent activity */}
@@ -278,38 +358,26 @@ export default function DashboardPage(): React.JSX.Element {
               </div>
             </CardHeader>
             <CardContent>
-              {/* Placeholder activity feed */}
+              {/* Activity feed placeholder — real-time activity from WebSocket/audit log */}
               <div className="space-y-1">
                 {[
                   {
-                    action: "Post published",
-                    detail: "Instagram — Acme Corp",
-                    time: "2 minutes ago",
-                    dot: "bg-emerald-500",
+                    action: 'Dashboard loaded',
+                    detail: 'Stats fetched from API',
+                    time: 'just now',
+                    dot: 'bg-emerald-500',
                   },
                   {
-                    action: "Post scheduled",
-                    detail: "Twitter — Globex Media",
-                    time: "14 minutes ago",
-                    dot: "bg-blue-500",
+                    action: 'View posts',
+                    detail: 'Go to Posts to see scheduled content',
+                    time: '',
+                    dot: 'bg-blue-500',
                   },
                   {
-                    action: "Client added",
-                    detail: "Initech Solutions",
-                    time: "1 hour ago",
-                    dot: "bg-violet-500",
-                  },
-                  {
-                    action: "Account connected",
-                    detail: "LinkedIn — Umbrella Corp",
-                    time: "3 hours ago",
-                    dot: "bg-amber-500",
-                  },
-                  {
-                    action: "Post failed",
-                    detail: "Facebook — Soylent Media",
-                    time: "5 hours ago",
-                    dot: "bg-red-500",
+                    action: 'Connect accounts',
+                    detail: 'Link more social profiles in Social Accounts',
+                    time: '',
+                    dot: 'bg-violet-500',
                   },
                 ].map((item, i) => (
                   <div
@@ -318,7 +386,7 @@ export default function DashboardPage(): React.JSX.Element {
                   >
                     <div
                       className={cn(
-                        "h-2 w-2 rounded-full shrink-0",
+                        'h-2 w-2 rounded-full shrink-0',
                         item.dot
                       )}
                       aria-hidden="true"
@@ -331,9 +399,11 @@ export default function DashboardPage(): React.JSX.Element {
                         {item.detail}
                       </p>
                     </div>
-                    <time className="text-xs text-slate-400 shrink-0">
-                      {item.time}
-                    </time>
+                    {item.time !== '' && (
+                      <time className="text-xs text-slate-400 shrink-0">
+                        {item.time}
+                      </time>
+                    )}
                   </div>
                 ))}
               </div>
@@ -360,18 +430,18 @@ export default function DashboardPage(): React.JSX.Element {
                 </p>
                 <div className="space-y-2">
                   {[
-                    { label: "Add your first client", done: true },
-                    { label: "Connect a social account", done: true },
-                    { label: "Schedule your first post", done: false },
-                    { label: "Invite a team member", done: false },
+                    { label: 'Add your first client', done: true },
+                    { label: 'Connect a social account', done: true },
+                    { label: 'Schedule your first post', done: false },
+                    { label: 'Invite a team member', done: false },
                   ].map((step) => (
                     <div key={step.label} className="flex items-center gap-2">
                       <div
                         className={cn(
-                          "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                          'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
                           step.done
-                            ? "border-emerald-500 bg-emerald-500"
-                            : "border-slate-300 bg-white"
+                            ? 'border-emerald-500 bg-emerald-500'
+                            : 'border-slate-300 bg-white'
                         )}
                         aria-hidden="true"
                       >
@@ -387,10 +457,10 @@ export default function DashboardPage(): React.JSX.Element {
                       </div>
                       <span
                         className={cn(
-                          "text-sm",
+                          'text-sm',
                           step.done
-                            ? "text-slate-400 line-through"
-                            : "text-slate-700 font-medium"
+                            ? 'text-slate-400 line-through'
+                            : 'text-slate-700 font-medium'
                         )}
                       >
                         {step.label}

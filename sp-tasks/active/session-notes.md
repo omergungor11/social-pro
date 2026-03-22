@@ -1,5 +1,35 @@
 # Session Notes
 
+## 2026-03-22 — Session 5
+
+### Completed
+- [x] Prisma seed data olusturuldu (7 client, 3 group, 9 social account, 18 post, 62 analytics snapshot, 8 notification, 5 AI generation, 6 usage record, 5 audit log)
+- [x] Seed basariyla calistirildi — DB'de gercek demo verisi var
+- [x] Frontend clients sayfasi API'ye baglandi (list, detail, groups — mock data kaldirildi)
+- [x] Frontend posts sayfasi API'ye baglandi (list — mock data kaldirildi)
+- [x] Frontend analytics sayfasi API'ye baglandi (overview, reports)
+- [x] Frontend billing sayfasi API'ye baglandi (subscription, usage, plans)
+- [x] Frontend dashboard home sayfasi API'ye baglandi (stats)
+
+### Yarim Kalan Isler
+- [ ] Posts detail ([postId]) ve new sayfasi API entegrasyonu tamamlanmadi
+- [ ] Client create/edit form API entegrasyonu kontrol edilmeli
+- [ ] Gercek OAuth platform app'leri olusturulmadi
+- [ ] GOOGLE_AI_API_KEY eklenmedi
+
+### Sonraki Session
+- [ ] Tum sayfalari acip test et (seed data gorunuyor mu?)
+- [ ] Posts detail + new sayfa API entegrasyonunu tamamla
+- [ ] Platform OAuth app kayitlari (Meta, Google, Twitter)
+- [ ] Production deployment hazirla
+
+### Dikkat Edilecekler
+- API port 6000 (.env'de PORT=6000)
+- Seed idempotent: `npx tsx prisma/seed.ts` tekrar calistiriinca tum veriyi siler ve yeniden olusturur
+- Frontend sayfalar API fail ederse graceful fallback yapiyor (empty state gosteriyor)
+
+---
+
 ## 2026-03-22 — Session 4
 
 ### Completed

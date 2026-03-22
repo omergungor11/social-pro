@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Pencil,
@@ -20,6 +20,9 @@ import {
   Twitter,
   Facebook,
   Linkedin,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -27,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Dialog, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,7 +47,7 @@ interface ClientGroup {
   color: string;
 }
 
-interface SocialAccount {
+interface SocialAccountDisplay {
   id: string;
   platform: 'instagram' | 'twitter' | 'facebook' | 'linkedin';
   handle: string;
@@ -59,83 +63,154 @@ interface ClientDetail {
   notes: string;
   tags: ClientTag[];
   groups: ClientGroup[];
-  socialAccounts: SocialAccount[];
+  socialAccounts: SocialAccountDisplay[];
   avatarInitials: string;
   avatarColor: string;
   createdAt: string;
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API response shapes
 // ---------------------------------------------------------------------------
 
-const MOCK_ALL_GROUPS: ClientGroup[] = [
-  { id: 'g1', name: 'Enterprise', color: 'bg-violet-100 text-violet-700 border-violet-200' },
-  { id: 'g2', name: 'Startup', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-  { id: 'g3', name: 'E-commerce', color: 'bg-pink-100 text-pink-700 border-pink-200' },
-  { id: 'g4', name: 'Healthcare', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  { id: 'g5', name: 'SaaS', color: 'bg-sky-100 text-sky-700 border-sky-200' },
-  { id: 'g6', name: 'Agency', color: 'bg-amber-100 text-amber-700 border-amber-200' },
+interface ApiClient {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  company: string | null;
+  notes: string | null;
+  tags: string[];
+  groups: { id: string; name: string; color?: string | null }[];
+  socialAccounts?: {
+    id: string;
+    platform: string;
+    platformUsername: string | null;
+    displayName: string | null;
+    isActive: boolean;
+  }[];
+  createdAt: string;
+}
+
+interface ApiGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const AVATAR_COLORS = [
+  'from-violet-500 to-purple-600',
+  'from-blue-500 to-cyan-600',
+  'from-emerald-500 to-teal-600',
+  'from-pink-500 to-rose-600',
+  'from-amber-500 to-orange-600',
+  'from-sky-500 to-blue-600',
+  'from-lime-500 to-green-600',
+  'from-fuchsia-500 to-pink-600',
 ];
 
-const MOCK_CLIENTS_MAP: Record<string, ClientDetail> = {
-  c1: {
-    id: 'c1',
-    name: 'Acme Corporation',
-    email: 'contact@acme.com',
-    phone: '+1 (555) 100-0001',
-    company: 'Acme Corp',
-    notes:
-      'Long-standing enterprise client. Quarterly review scheduled for Q2. Primary contact is Sarah Johnson from marketing. Prefers content reviewed before publishing.',
-    tags: [
-      { label: 'Enterprise', variant: 'purple' },
-      { label: 'VIP', variant: 'blue' },
-    ],
-    groups: [MOCK_ALL_GROUPS[0]!],
-    socialAccounts: [
-      { id: 'sa1', platform: 'instagram', handle: '@acmecorp', connected: true },
-      { id: 'sa2', platform: 'twitter', handle: '@AcmeCorp', connected: true },
-      { id: 'sa3', platform: 'linkedin', handle: 'acme-corporation', connected: false },
-    ],
-    avatarInitials: 'AC',
-    avatarColor: 'from-violet-500 to-purple-600',
-    createdAt: '2024-01-15',
-  },
-  c2: {
-    id: 'c2',
-    name: 'Bright Ideas Studio',
-    email: 'hello@brightideas.io',
-    phone: '+1 (555) 200-0002',
-    company: 'Bright Ideas Studio',
-    notes: 'Creative agency, monthly retainer. Focus on Instagram and Pinterest.',
-    tags: [{ label: 'Agency', variant: 'green' }],
-    groups: [MOCK_ALL_GROUPS[5]!],
-    socialAccounts: [
-      { id: 'sa4', platform: 'instagram', handle: '@brightideasstudio', connected: true },
-      { id: 'sa5', platform: 'facebook', handle: 'BrightIdeasStudio', connected: true },
-    ],
-    avatarInitials: 'BI',
-    avatarColor: 'from-emerald-500 to-teal-600',
-    createdAt: '2024-02-03',
-  },
+function getAvatarColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) & 0xffffffff;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join('');
+}
+
+const GROUP_COLORS: Record<string, string> = {
+  violet: 'bg-violet-100 text-violet-700 border-violet-200',
+  blue: 'bg-blue-100 text-blue-700 border-blue-200',
+  emerald: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  pink: 'bg-pink-100 text-pink-700 border-pink-200',
+  amber: 'bg-amber-100 text-amber-700 border-amber-200',
+  cyan: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  red: 'bg-red-100 text-red-700 border-red-200',
+  slate: 'bg-slate-100 text-slate-700 border-slate-200',
 };
 
-// Fallback for unknown IDs
-function buildFallbackClient(id: string): ClientDetail {
+function getGroupColor(color: string | null | undefined): string {
+  if (!color) return GROUP_COLORS['slate']!;
+  return GROUP_COLORS[color] ?? GROUP_COLORS['slate']!;
+}
+
+function mapApiClient(a: ApiClient): ClientDetail {
   return {
-    id,
-    name: 'Unknown Client',
-    email: 'unknown@example.com',
-    phone: '',
-    company: '',
-    notes: '',
-    tags: [],
-    groups: [],
-    socialAccounts: [],
-    avatarInitials: 'UC',
-    avatarColor: 'from-slate-400 to-slate-600',
-    createdAt: new Date().toISOString().slice(0, 10),
+    id: a.id,
+    name: a.name,
+    email: a.email,
+    phone: a.phone ?? '',
+    company: a.company ?? '',
+    notes: a.notes ?? '',
+    tags: a.tags.map((label) => ({ label, variant: 'default' as const })),
+    groups: a.groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      color: getGroupColor(g.color),
+    })),
+    socialAccounts: (a.socialAccounts ?? [])
+      .filter((sa) =>
+        ['instagram', 'twitter', 'facebook', 'linkedin'].includes(sa.platform.toLowerCase())
+      )
+      .map((sa) => ({
+        id: sa.id,
+        platform: sa.platform.toLowerCase() as SocialAccountDisplay['platform'],
+        handle: sa.platformUsername ?? sa.displayName ?? sa.platform,
+        connected: sa.isActive,
+      })),
+    avatarInitials: getInitials(a.name),
+    avatarColor: getAvatarColor(a.id),
+    createdAt: a.createdAt.slice(0, 10),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+function Toast({
+  message,
+  type,
+  onClose,
+}: {
+  message: string;
+  type: 'success' | 'error';
+  onClose: () => void;
+}): React.JSX.Element {
+  React.useEffect(() => {
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div
+      className={cn(
+        'fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg',
+        type === 'success'
+          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+          : 'bg-red-50 text-red-800 border border-red-200'
+      )}
+    >
+      {type === 'success' ? (
+        <CheckCircle2 className="h-4 w-4" />
+      ) : (
+        <AlertCircle className="h-4 w-4" />
+      )}
+      {message}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -146,10 +221,10 @@ function PlatformIcon({
   platform,
   className,
 }: {
-  platform: SocialAccount['platform'];
+  platform: SocialAccountDisplay['platform'];
   className?: string;
 }): React.JSX.Element {
-  const icons: Record<SocialAccount['platform'], React.ElementType> = {
+  const icons: Record<SocialAccountDisplay['platform'], React.ElementType> = {
     instagram: Instagram,
     twitter: Twitter,
     facebook: Facebook,
@@ -159,7 +234,7 @@ function PlatformIcon({
   return <Icon className={cn('h-4 w-4', className)} aria-hidden="true" />;
 }
 
-const PLATFORM_COLORS: Record<SocialAccount['platform'], string> = {
+const PLATFORM_COLORS: Record<SocialAccountDisplay['platform'], string> = {
   instagram: 'text-pink-600 bg-pink-50 border-pink-200',
   twitter: 'text-sky-600 bg-sky-50 border-sky-200',
   facebook: 'text-blue-600 bg-blue-50 border-blue-200',
@@ -172,15 +247,19 @@ const PLATFORM_COLORS: Record<SocialAccount['platform'], string> = {
 
 export default function ClientDetailPage(): React.JSX.Element {
   const params = useParams();
+  const router = useRouter();
   const clientId = typeof params['clientId'] === 'string' ? params['clientId'] : '';
 
   // ── State ─────────────────────────────────────────────────────────────────
-  const [client, setClient] = React.useState<ClientDetail>(() => {
-    return MOCK_CLIENTS_MAP[clientId] ?? buildFallbackClient(clientId);
-  });
+  const [client, setClient] = React.useState<ClientDetail | null>(null);
+  const [allGroups, setAllGroups] = React.useState<ClientGroup[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [saving, setSaving] = React.useState(false);
 
   const [isEditingNotes, setIsEditingNotes] = React.useState(false);
-  const [notesBuffer, setNotesBuffer] = React.useState(client.notes);
+  const [notesBuffer, setNotesBuffer] = React.useState('');
 
   // Dialogs
   const [addTagOpen, setAddTagOpen] = React.useState(false);
@@ -191,25 +270,84 @@ export default function ClientDetailPage(): React.JSX.Element {
 
   // Edit form
   const [editForm, setEditForm] = React.useState({
-    name: client.name,
-    email: client.email,
-    phone: client.phone,
-    company: client.company,
+    name: '',
+    email: '',
+    phone: '',
+    company: '',
   });
 
+  // ── Fetch client ──────────────────────────────────────────────────────────
+  const fetchClient = React.useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await apiClient.get<ApiClient>(`/clients/${clientId}`);
+      const mapped = mapApiClient(data);
+      setClient(mapped);
+      setNotesBuffer(mapped.notes);
+      setEditForm({
+        name: mapped.name,
+        email: mapped.email,
+        phone: mapped.phone,
+        company: mapped.company,
+      });
+    } catch (err) {
+      console.error('Failed to fetch client:', err);
+      setError('Failed to load client. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  const fetchAllGroups = React.useCallback(async () => {
+    try {
+      const data = await apiClient.get<ApiGroup[]>('/clients/groups');
+      setAllGroups(data.map((g) => ({
+        id: g.id,
+        name: g.name,
+        color: getGroupColor(g.color),
+      })));
+    } catch (err) {
+      console.error('Failed to fetch groups:', err);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchClient();
+    void fetchAllGroups();
+  }, [fetchClient, fetchAllGroups]);
+
+  const unassignedGroups = React.useMemo(
+    () => allGroups.filter((g) => !client?.groups.some((cg) => cg.id === g.id)),
+    [allGroups, client]
+  );
+
   // ── Notes handlers ────────────────────────────────────────────────────────
-  function handleSaveNotes(): void {
-    setClient((c) => ({ ...c, notes: notesBuffer }));
-    setIsEditingNotes(false);
+  async function handleSaveNotes(): Promise<void> {
+    if (!client) return;
+    setSaving(true);
+    try {
+      await apiClient.patch(`/clients/${client.id}`, { notes: notesBuffer });
+      setClient((c) => c ? { ...c, notes: notesBuffer } : c);
+      setIsEditingNotes(false);
+      setToast({ message: 'Notes saved', type: 'success' });
+    } catch (err) {
+      console.error('Failed to save notes:', err);
+      setToast({ message: 'Failed to save notes. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleCancelNotes(): void {
-    setNotesBuffer(client.notes);
+    setNotesBuffer(client?.notes ?? '');
     setIsEditingNotes(false);
   }
 
   // ── Tag handlers ──────────────────────────────────────────────────────────
-  function handleAddTag(): void {
+  async function handleAddTag(): Promise<void> {
+    if (!client) return;
     const label = newTag.trim();
     if (!label) return;
     if (client.tags.some((t) => t.label.toLowerCase() === label.toLowerCase())) {
@@ -217,51 +355,151 @@ export default function ClientDetailPage(): React.JSX.Element {
       setAddTagOpen(false);
       return;
     }
-    setClient((c) => ({
-      ...c,
-      tags: [...c.tags, { label, variant: 'default' }],
-    }));
+    const newTags = [...client.tags.map((t) => t.label), label];
+    try {
+      await apiClient.patch(`/clients/${client.id}`, { tags: newTags });
+      setClient((c) =>
+        c
+          ? { ...c, tags: [...c.tags, { label, variant: 'default' as const }] }
+          : c
+      );
+      setToast({ message: 'Tag added', type: 'success' });
+    } catch (err) {
+      console.error('Failed to add tag:', err);
+      setToast({ message: 'Failed to add tag. Please try again.', type: 'error' });
+    }
     setNewTag('');
     setAddTagOpen(false);
   }
 
-  function handleRemoveTag(label: string): void {
-    setClient((c) => ({
-      ...c,
-      tags: c.tags.filter((t) => t.label !== label),
-    }));
+  async function handleRemoveTag(label: string): Promise<void> {
+    if (!client) return;
+    const newTags = client.tags.filter((t) => t.label !== label).map((t) => t.label);
+    try {
+      await apiClient.patch(`/clients/${client.id}`, { tags: newTags });
+      setClient((c) =>
+        c ? { ...c, tags: c.tags.filter((t) => t.label !== label) } : c
+      );
+      setToast({ message: 'Tag removed', type: 'success' });
+    } catch (err) {
+      console.error('Failed to remove tag:', err);
+      setToast({ message: 'Failed to remove tag. Please try again.', type: 'error' });
+    }
   }
 
   // ── Group handlers ────────────────────────────────────────────────────────
-  const unassignedGroups = MOCK_ALL_GROUPS.filter(
-    (g) => !client.groups.some((cg) => cg.id === g.id)
-  );
-
-  function handleAssignGroup(group: ClientGroup): void {
-    setClient((c) => ({ ...c, groups: [...c.groups, group] }));
+  async function handleAssignGroup(group: ClientGroup): Promise<void> {
+    if (!client) return;
+    try {
+      await apiClient.post(`/clients/groups/${group.id}/members`, {
+        clientIds: [client.id],
+      });
+      setClient((c) => c ? { ...c, groups: [...c.groups, group] } : c);
+      setToast({ message: `Added to ${group.name}`, type: 'success' });
+    } catch (err) {
+      console.error('Failed to assign group:', err);
+      setToast({ message: 'Failed to assign group. Please try again.', type: 'error' });
+    }
   }
 
-  function handleUnassignGroup(groupId: string): void {
-    setClient((c) => ({
-      ...c,
-      groups: c.groups.filter((g) => g.id !== groupId),
-    }));
+  async function handleUnassignGroup(groupId: string): Promise<void> {
+    if (!client) return;
+    try {
+      await apiClient.delete(`/clients/groups/${groupId}/members`, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientIds: [client.id] }) as unknown as BodyInit,
+      } as RequestInit);
+      setClient((c) =>
+        c ? { ...c, groups: c.groups.filter((g) => g.id !== groupId) } : c
+      );
+      setToast({ message: 'Removed from group', type: 'success' });
+    } catch (err) {
+      console.error('Failed to unassign group:', err);
+      setToast({ message: 'Failed to remove from group. Please try again.', type: 'error' });
+    }
   }
 
   // ── Edit handlers ─────────────────────────────────────────────────────────
-  function handleSaveEdit(): void {
-    setClient((c) => ({ ...c, ...editForm }));
-    setEditOpen(false);
+  async function handleSaveEdit(): Promise<void> {
+    if (!client) return;
+    setSaving(true);
+    try {
+      const updated = await apiClient.patch<ApiClient>(`/clients/${client.id}`, {
+        name: editForm.name.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim() || undefined,
+        company: editForm.company.trim() || undefined,
+      });
+      const mapped = mapApiClient(updated);
+      setClient((c) => c ? { ...mapped, notes: c.notes, tags: c.tags, groups: c.groups, socialAccounts: c.socialAccounts } : c);
+      setEditOpen(false);
+      setToast({ message: 'Client updated', type: 'success' });
+    } catch (err) {
+      console.error('Failed to update client:', err);
+      setToast({ message: 'Failed to update client. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Delete handler ─────────────────────────────────────────────────────────
+  async function handleDeleteClient(): Promise<void> {
+    if (!client) return;
+    setSaving(true);
+    try {
+      await apiClient.delete(`/clients/${client.id}`);
+      router.push('/dashboard/clients');
+    } catch (err) {
+      console.error('Failed to delete client:', err);
+      setToast({ message: 'Failed to delete client. Please try again.', type: 'error' });
+      setDeleteOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Loading / error states ────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (error || !client) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <AlertCircle className="h-10 w-10 text-red-400" />
+        <p className="text-slate-600">{error ?? 'Client not found.'}</p>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => void fetchClient()}>
+            Retry
+          </Button>
+          <Link href="/dashboard/clients">
+            <Button variant="outline">Back to Clients</Button>
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <div className="space-y-6 pb-10">
         {/* ── Page header ─────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/clients">
+            <Link href="/dashboard/clients">
               <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Back to clients">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -432,7 +670,7 @@ export default function ClientDetailPage(): React.JSX.Element {
                         </span>
                         <button
                           type="button"
-                          onClick={() => handleUnassignGroup(group.id)}
+                          onClick={() => void handleUnassignGroup(group.id)}
                           className="rounded p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
                           aria-label={`Remove from ${group.name}`}
                         >
@@ -478,7 +716,7 @@ export default function ClientDetailPage(): React.JSX.Element {
                         {tag.label}
                         <button
                           type="button"
-                          onClick={() => handleRemoveTag(tag.label)}
+                          onClick={() => void handleRemoveTag(tag.label)}
                           className="ml-0.5 rounded-full p-0.5 text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
                           aria-label={`Remove tag ${tag.label}`}
                         >
@@ -530,8 +768,17 @@ export default function ClientDetailPage(): React.JSX.Element {
                       )}
                     />
                     <div className="flex gap-2">
-                      <Button size="sm" onClick={handleSaveNotes} className="gap-1.5">
-                        <Check className="h-3.5 w-3.5" />
+                      <Button
+                        size="sm"
+                        onClick={() => void handleSaveNotes()}
+                        className="gap-1.5"
+                        disabled={saving}
+                      >
+                        {saving ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
                         Save
                       </Button>
                       <Button size="sm" variant="ghost" onClick={handleCancelNotes}>
@@ -621,9 +868,7 @@ export default function ClientDetailPage(): React.JSX.Element {
                           <span
                             className={cn(
                               'h-1.5 w-1.5 rounded-full',
-                              account.connected
-                                ? 'bg-emerald-500'
-                                : 'bg-slate-400'
+                              account.connected ? 'bg-emerald-500' : 'bg-slate-400'
                             )}
                           />
                           {account.connected ? 'Connected' : 'Disconnected'}
@@ -657,7 +902,7 @@ export default function ClientDetailPage(): React.JSX.Element {
             value={newTag}
             onChange={(e) => setNewTag(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddTag();
+              if (e.key === 'Enter') void handleAddTag();
             }}
             autoFocus
           />
@@ -671,7 +916,7 @@ export default function ClientDetailPage(): React.JSX.Element {
             >
               Cancel
             </Button>
-            <Button onClick={handleAddTag} disabled={!newTag.trim()}>
+            <Button onClick={() => void handleAddTag()} disabled={!newTag.trim()}>
               Add Tag
             </Button>
           </DialogFooter>
@@ -698,7 +943,7 @@ export default function ClientDetailPage(): React.JSX.Element {
                 key={group.id}
                 type="button"
                 onClick={() => {
-                  handleAssignGroup(group);
+                  void handleAssignGroup(group);
                   setAssignGroupOpen(false);
                 }}
                 className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
@@ -771,10 +1016,17 @@ export default function ClientDetailPage(): React.JSX.Element {
               Cancel
             </Button>
             <Button
-              onClick={handleSaveEdit}
-              disabled={!editForm.name.trim() || !editForm.email.trim()}
+              onClick={() => void handleSaveEdit()}
+              disabled={!editForm.name.trim() || !editForm.email.trim() || saving}
             >
-              Save Changes
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
             </Button>
           </DialogFooter>
         </div>
@@ -793,8 +1045,19 @@ export default function ClientDetailPage(): React.JSX.Element {
           <Button variant="outline" onClick={() => setDeleteOpen(false)}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={() => setDeleteOpen(false)}>
-            Delete Client
+          <Button
+            variant="destructive"
+            disabled={saving}
+            onClick={() => void handleDeleteClient()}
+          >
+            {saving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete Client'
+            )}
           </Button>
         </DialogFooter>
       </Dialog>
