@@ -15,10 +15,10 @@ type BillingCycle = 'monthly' | 'yearly';
 
 interface PlanFeature {
   label: string;
-  free: string | false;
-  pro: string | false;
-  business: string | false;
-  enterprise: string | false;
+  free: string | boolean;
+  pro: string | boolean;
+  business: string | boolean;
+  enterprise: string | boolean;
 }
 
 interface Plan {
