@@ -266,7 +266,7 @@ export default function NewPostPage(): React.JSX.Element {
         // API may return paginated or array — handle both
         const response = await apiClient.get<
           { items: ApiClient[]; total: number } | ApiClient[]
-        >('/clients?limit=200&page=1');
+        >('/clients?limit=100&page=1');
 
         const list: ApiClient[] = Array.isArray(response)
           ? (response as ApiClient[])
