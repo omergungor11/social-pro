@@ -20,6 +20,7 @@ import { PostPreview, PLATFORM_CHAR_LIMITS } from '@/components/posts/post-previ
 import {
   PlatformIcon, getPlatformLabel, PLATFORM_ACCENT, type Platform,
 } from '@/components/social/platform-icon';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +37,7 @@ interface PlatformTarget {
   metrics?: { likes: number; comments: number; shares: number; impressions: number; engagementRate: number };
 }
 
-interface MockPost {
+interface PostDetail {
   id: string;
   title: string;
   content: string;
@@ -52,67 +53,97 @@ interface MockPost {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API shapes
 // ---------------------------------------------------------------------------
 
-const MOCK: Record<string, MockPost> = {
-  p1: {
-    id: 'p1', title: 'Q1 Product Launch Announcement',
-    content: 'Exciting news! We\'re thrilled to announce the launch of our new product line this spring. Stay tuned for more details! #ProductLaunch #Spring2026',
-    platformContents: {
-      twitter: '🚀 BIG NEWS: Our new product line is here! We\'ve been working on this for months and can\'t wait for you to try it.\n\n#ProductLaunch #Spring2026 #Innovation',
-      linkedin: 'I\'m excited to share that we\'re officially launching our new product line this spring.\n\nAfter months of development, rigorous testing, and valuable feedback from our beta users, we\'re confident this will transform how teams collaborate.\n\nKey highlights:\n✅ 3x faster performance\n✅ AI-powered workflows\n✅ Enterprise-grade security\n\nStay tuned for the full reveal. #ProductLaunch #SaaS #Innovation',
-      facebook: '🎉 Exciting news for our community! We\'re launching a brand new product line this spring. Stay tuned for more details — you won\'t want to miss this! #ProductLaunch',
-    },
-    platforms: ['twitter', 'linkedin', 'facebook'],
-    status: 'published', scheduledDate: '2026-03-01', scheduledTime: '10:00', timezone: 'America/New_York',
-    clientId: 'c1', clientName: 'Acme Corporation',
-    targets: [
-      { platform: 'twitter', status: 'published', publishedAt: '2026-03-01T10:00:00Z', url: 'https://x.com/acmecorp/status/123', error: null, metrics: { likes: 842, comments: 67, shares: 234, impressions: 45200, engagementRate: 5.2 } },
-      { platform: 'linkedin', status: 'published', publishedAt: '2026-03-01T10:01:00Z', url: 'https://linkedin.com/posts/acme-123', error: null, metrics: { likes: 1240, comments: 89, shares: 156, impressions: 67800, engagementRate: 4.8 } },
-      { platform: 'facebook', status: 'failed', publishedAt: null, url: null, error: 'Access token expired. Please reconnect your Facebook account.', metrics: undefined },
-    ],
-  },
-  p2: {
-    id: 'p2', title: 'Spring Sale — 30% Off Everything',
-    content: 'Our biggest sale of the year starts NOW. Shop all categories and save 30% sitewide. Limited time only!',
-    platformContents: {
-      instagram: '🌸 SPRING SALE 🌸\n\n30% OFF EVERYTHING!\n\nOur biggest sale of the year is HERE. From skincare to fashion — everything in store is 30% off.\n\n🛍️ Use code: SPRING30\n⏰ Limited time only\n📦 Free shipping over $50\n\nTap link in bio to shop now!\n\n#SpringSale #Sale #ShopNow #Fashion #Beauty',
-      facebook: '🎉 Our biggest sale of the year starts NOW!\n\nShop all categories and save 30% sitewide with code SPRING30.\n\nDon\'t miss out — limited time only! Free shipping on orders over $50.\n\n👉 Shop now: echocommerce.com/spring-sale',
-    },
-    platforms: ['instagram', 'facebook'],
-    status: 'scheduled', scheduledDate: '2026-03-20', scheduledTime: '09:00', timezone: 'America/New_York',
-    clientId: 'c5', clientName: 'Echo Commerce',
-    targets: [
-      { platform: 'instagram', status: 'scheduled', publishedAt: null, url: null, error: null },
-      { platform: 'facebook', status: 'scheduled', publishedAt: null, url: null, error: null },
-    ],
-  },
-  p4: {
-    id: 'p4', title: 'Thought Leadership: The Future of SaaS',
-    content: 'As we look ahead to 2027, the SaaS landscape is evolving faster than ever.\n\n5 trends:\n1. AI-native workflows\n2. Vertical specialization\n3. Embedded finance\n4. Developer-led growth\n5. Privacy-first architecture',
-    platforms: ['linkedin'],
-    status: 'draft', scheduledDate: '', scheduledTime: '09:00', timezone: 'America/New_York',
-    clientId: 'c3', clientName: 'CloudSync Systems',
-    targets: [{ platform: 'linkedin', status: 'pending', publishedAt: null, url: null, error: null }],
-  },
-};
-
-function fallback(id: string): MockPost {
-  return { id, title: 'Sample Post', content: 'Edit this to create your message.', platforms: ['twitter', 'instagram'], status: 'draft', scheduledDate: '', scheduledTime: '09:00', timezone: 'America/New_York', clientId: '', clientName: '', targets: [{ platform: 'twitter', status: 'pending', publishedAt: null, url: null, error: null }, { platform: 'instagram', status: 'pending', publishedAt: null, url: null, error: null }] };
+interface ApiPost {
+  id: string;
+  title: string;
+  content: string;
+  platformContents?: Record<string, string> | null;
+  platforms: string[];
+  status: string;
+  scheduledAt: string | null;
+  timezone?: string | null;
+  clientId: string | null;
+  client?: { id: string; name: string } | null;
+  targets?: {
+    platform: string;
+    status: string;
+    publishedAt: string | null;
+    url: string | null;
+    error: string | null;
+    metrics?: {
+      likes?: number;
+      comments?: number;
+      shares?: number;
+      impressions?: number;
+      engagementRate?: number;
+    } | null;
+  }[] | null;
 }
 
+interface ApiClient {
+  id: string;
+  name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Map API post to local PostDetail shape
+// ---------------------------------------------------------------------------
+
+function mapApiPost(a: ApiPost): PostDetail {
+  let scheduledDate = '';
+  let scheduledTime = '09:00';
+  if (a.scheduledAt) {
+    const d = new Date(a.scheduledAt);
+    scheduledDate = d.toISOString().slice(0, 10);
+    scheduledTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  return {
+    id: a.id,
+    title: a.title || 'Untitled Post',
+    content: a.content,
+    platformContents: a.platformContents ?? undefined,
+    platforms: a.platforms.map((p) => p.toLowerCase()) as Platform[],
+    status: (a.status.toLowerCase()) as PostDetail['status'],
+    scheduledDate,
+    scheduledTime,
+    timezone: a.timezone ?? 'America/New_York',
+    clientId: a.clientId ?? '',
+    clientName: a.client?.name ?? '',
+    targets: (a.targets ?? []).map((t) => ({
+      platform: t.platform.toLowerCase() as Platform,
+      status: (t.status.toLowerCase()) as PublishStatus,
+      publishedAt: t.publishedAt,
+      url: t.url,
+      error: t.error,
+      metrics: t.metrics
+        ? {
+            likes: t.metrics.likes ?? 0,
+            comments: t.metrics.comments ?? 0,
+            shares: t.metrics.shares ?? 0,
+            impressions: t.metrics.impressions ?? 0,
+            engagementRate: t.metrics.engagementRate ?? 0,
+          }
+        : undefined,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const ALL_PLATFORMS: Platform[] = ['twitter', 'facebook', 'instagram', 'linkedin', 'tiktok', 'youtube'];
-const CLIENT_OPTIONS = [
-  { value: '', label: 'Select a client…' },
-  { value: 'c1', label: 'Acme Corporation' }, { value: 'c2', label: 'Bright Ideas Studio' },
-  { value: 'c3', label: 'CloudSync Systems' }, { value: 'c4', label: 'Delta Health Partners' },
-  { value: 'c5', label: 'Echo Commerce' }, { value: 'c6', label: 'Founders Launchpad' },
-];
 const TZ_OPTIONS = [
-  { value: 'America/New_York', label: 'Eastern (ET)' }, { value: 'America/Chicago', label: 'Central (CT)' },
-  { value: 'America/Los_Angeles', label: 'Pacific (PT)' }, { value: 'Europe/London', label: 'London (GMT)' },
-  { value: 'Europe/Istanbul', label: 'Istanbul (TRT)' }, { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'Eastern (ET)' },
+  { value: 'America/Chicago', label: 'Central (CT)' },
+  { value: 'America/Los_Angeles', label: 'Pacific (PT)' },
+  { value: 'Europe/London', label: 'London (GMT)' },
+  { value: 'Europe/Istanbul', label: 'Istanbul (TRT)' },
+  { value: 'UTC', label: 'UTC' },
 ];
 
 function fmt(n: number): string {
@@ -122,10 +153,47 @@ function fmt(n: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+function Toast({
+  message,
+  type,
+  onClose,
+}: {
+  message: string;
+  type: 'success' | 'error';
+  onClose: () => void;
+}): React.JSX.Element {
+  React.useEffect(() => {
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div
+      className={cn(
+        'fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg',
+        type === 'success'
+          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+          : 'bg-red-50 text-red-800 border border-red-200'
+      )}
+    >
+      {type === 'success' ? (
+        <CheckCircle2 className="h-4 w-4" />
+      ) : (
+        <AlertCircle className="h-4 w-4" />
+      )}
+      {message}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Char counter
 // ---------------------------------------------------------------------------
 
-function CharCounter({ count, limit }: { count: number; limit: number }) {
+function CharCounter({ count, limit }: { count: number; limit: number }): React.JSX.Element {
   const remaining = limit - count;
   const pct = count / limit;
   return (
@@ -154,7 +222,7 @@ function CrossPostDialog({
 }: {
   open: boolean; onClose: () => void; sourceContent: string; sourcePlatform: Platform;
   existingPlatforms: Platform[]; onConfirm: (targets: Platform[], contents: Record<string, string>) => void;
-}) {
+}): React.JSX.Element {
   const available = ALL_PLATFORMS_LIST.filter((p) => !existingPlatforms.includes(p));
   const [selected, setSelected] = React.useState<Platform[]>([]);
   const [contents, setContents] = React.useState<Record<string, string>>({});
@@ -168,7 +236,7 @@ function CrossPostDialog({
     }
   }, [open]);
 
-  function toggle(p: Platform) {
+  function toggle(p: Platform): void {
     setSelected((prev) => {
       const next = prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p];
       if (!prev.includes(p) && !contents[p]) {
@@ -185,7 +253,6 @@ function CrossPostDialog({
   return (
     <Dialog open={open} onClose={onClose} title="Share to Other Platforms" description={`Cross-post your ${getPlatformLabel(sourcePlatform)} content to additional platforms.`} maxWidth="max-w-3xl">
       <div className="space-y-4">
-        {/* Source */}
         <div className="rounded-lg bg-slate-50 p-3 border border-slate-100">
           <div className="flex items-center gap-2 mb-2">
             <PlatformIcon platform={sourcePlatform} size="sm" />
@@ -194,7 +261,6 @@ function CrossPostDialog({
           <p className="text-xs text-slate-500 line-clamp-2">{sourceContent}</p>
         </div>
 
-        {/* Target selection */}
         <div>
           <p className="text-xs font-medium text-slate-500 mb-2">Select target platforms</p>
           {available.length === 0 ? (
@@ -219,10 +285,8 @@ function CrossPostDialog({
           )}
         </div>
 
-        {/* Per-target content editing + preview */}
         {selected.length > 0 && (
           <div className="space-y-3">
-            {/* Tabs */}
             <div className="flex gap-1 border-b border-slate-100 pb-2">
               {selected.map((p) => (
                 <button key={p} type="button" onClick={() => setPreviewPlatform(p)}
@@ -240,7 +304,6 @@ function CrossPostDialog({
               ))}
             </div>
 
-            {/* Active editor + preview */}
             {previewPlatform && selected.includes(previewPlatform) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-2">
@@ -250,7 +313,7 @@ function CrossPostDialog({
                   </div>
                   <textarea
                     value={contents[previewPlatform] ?? sourceContent}
-                    onChange={(e) => setContents((c) => ({ ...c, [previewPlatform]: e.target.value }))}
+                    onChange={(e) => setContents((c) => ({ ...c, [previewPlatform!]: e.target.value }))}
                     rows={6}
                     className="flex w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm placeholder:text-slate-400 resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     placeholder={`Adapt for ${getPlatformLabel(previewPlatform)}…`}
@@ -292,7 +355,7 @@ function PlatformEditor({
   platform: Platform; content: string; onChange: (v: string) => void;
   target?: PlatformTarget; media: string | null; mediaList?: string[]; disabled: boolean;
   onCrossPost?: (sourcePlatform: Platform, sourceContent: string) => void;
-}) {
+}): React.JSX.Element {
   const limit = PLATFORM_CHAR_LIMITS[platform];
   const m = target?.metrics;
   const accentBorder = PLATFORM_ACCENT[platform];
@@ -300,7 +363,6 @@ function PlatformEditor({
 
   return (
     <div className={cn('rounded-xl border-l-4 border border-slate-200 bg-white overflow-hidden', accentBorder)}>
-      {/* Platform header */}
       <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/80 border-b border-slate-100">
         <PlatformIcon platform={platform} size="sm" />
         <span className="text-sm font-semibold text-slate-800">{getPlatformLabel(platform)}</span>
@@ -312,7 +374,6 @@ function PlatformEditor({
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Cross-post button */}
           {isPublished && onCrossPost && (
             <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
               onClick={() => onCrossPost(platform, content)}
@@ -336,7 +397,6 @@ function PlatformEditor({
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
-        {/* Left: Editor */}
         <div className="p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500">Content</span>
@@ -356,7 +416,6 @@ function PlatformEditor({
             )}
           />
 
-          {/* Metrics (published only) */}
           {m && (
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Performance</p>
@@ -381,15 +440,8 @@ function PlatformEditor({
               </div>
             </div>
           )}
-
-          {target?.status === 'failed' && (
-            <Button size="sm" variant="outline" className="w-full text-xs text-red-600 border-red-200 hover:bg-red-50 gap-1.5" onClick={() => alert('Retry (mock)')}>
-              <XCircle className="h-3.5 w-3.5" /> Retry Publish
-            </Button>
-          )}
         </div>
 
-        {/* Right: Preview */}
         <div className="p-4 bg-slate-50/50">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Live Preview</p>
           <PostPreview content={content} platform={platform} media={media} mediaList={mediaList} />
@@ -403,50 +455,100 @@ function PlatformEditor({
 // Page
 // ---------------------------------------------------------------------------
 
-export default function EditPostPage() {
+export default function EditPostPage(): React.JSX.Element {
   const params = useParams<{ postId: string }>();
   const router = useRouter();
   const postId = params.postId;
-  const post = MOCK[postId] ?? fallback(postId);
-  const isPublished = post.status === 'published';
 
-  // State
-  const [title, setTitle] = React.useState(post.title);
-  const [platforms, setPlatforms] = React.useState<Platform[]>(post.platforms);
-  const [contents, setContents] = React.useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {};
-    post.platforms.forEach((p) => {
-      init[p] = post.platformContents?.[p] ?? post.content;
-    });
-    return init;
-  });
-  const [clientId, setClientId] = React.useState(post.clientId);
-  const [scheduleDate, setScheduleDate] = React.useState(post.scheduledDate);
-  const [scheduleTime, setScheduleTime] = React.useState(post.scheduledTime);
-  const [timezone, setTimezone] = React.useState(post.timezone);
+  // ── Fetch state ───────────────────────────────────────────────────────────
+  const [post, setPost] = React.useState<PostDetail | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [saving, setSaving] = React.useState(false);
+
+  // ── Client options from API ───────────────────────────────────────────────
+  const [clientOptions, setClientOptions] = React.useState<{ value: string; label: string }[]>([
+    { value: '', label: 'Select a client…' },
+  ]);
+
+  // ── Editor state (initialised after fetch) ────────────────────────────────
+  const [title, setTitle] = React.useState('');
+  const [platforms, setPlatforms] = React.useState<Platform[]>([]);
+  const [contents, setContents] = React.useState<Record<string, string>>({});
+  const [clientId, setClientId] = React.useState('');
+  const [scheduleDate, setScheduleDate] = React.useState('');
+  const [scheduleTime, setScheduleTime] = React.useState('09:00');
+  const [timezone, setTimezone] = React.useState('America/New_York');
   const [uploadedFiles, setUploadedFiles] = React.useState<UploadedFile[]>([]);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [crossPostOpen, setCrossPostOpen] = React.useState(false);
   const [crossPostSource, setCrossPostSource] = React.useState<{ platform: Platform; content: string } | null>(null);
 
+  // ── Fetch post ────────────────────────────────────────────────────────────
+  const fetchPost = React.useCallback(async () => {
+    if (!postId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await apiClient.get<ApiPost>(`/posts/${postId}`);
+      const mapped = mapApiPost(data);
+      setPost(mapped);
+      setTitle(mapped.title);
+      setPlatforms(mapped.platforms);
+      const initContents: Record<string, string> = {};
+      mapped.platforms.forEach((p) => {
+        initContents[p] = mapped.platformContents?.[p] ?? mapped.content;
+      });
+      setContents(initContents);
+      setClientId(mapped.clientId);
+      setScheduleDate(mapped.scheduledDate);
+      setScheduleTime(mapped.scheduledTime);
+      setTimezone(mapped.timezone);
+    } catch (err) {
+      console.error('Failed to fetch post:', err);
+      setError('Failed to load post. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [postId]);
+
+  const fetchClients = React.useCallback(async () => {
+    try {
+      const data = await apiClient.get<ApiClient[]>('/clients');
+      setClientOptions([
+        { value: '', label: 'Select a client…' },
+        ...data.map((c) => ({ value: c.id, label: c.name })),
+      ]);
+    } catch (err) {
+      console.error('Failed to fetch clients for selector:', err);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void fetchPost();
+    void fetchClients();
+  }, [fetchPost, fetchClients]);
+
+  const isPublished = post?.status === 'published';
   const allMedia = uploadedFiles.filter((f) => f.preview !== null).map((f) => f.preview!);
   const firstMedia = allMedia[0] ?? null;
 
-  function setContentFor(p: Platform, v: string) {
+  function setContentFor(p: Platform, v: string): void {
     setContents((prev) => ({ ...prev, [p]: v }));
   }
   function getContentFor(p: Platform): string {
-    return contents[p] ?? post.content;
+    return contents[p] ?? post?.content ?? '';
   }
-  function togglePlatform(p: Platform) {
+  function togglePlatform(p: Platform): void {
     if (isPublished) return;
     setPlatforms((prev) => {
       if (prev.includes(p)) return prev.filter((x) => x !== p);
-      if (!contents[p]) setContents((c) => ({ ...c, [p]: post.content }));
+      if (!contents[p]) setContents((c) => ({ ...c, [p]: post?.content ?? '' }));
       return [...prev, p];
     });
   }
-  function copyToAll() {
+  function copyToAll(): void {
     if (platforms.length === 0) return;
     const src = getContentFor(platforms[0]!);
     const updated: Record<string, string> = {};
@@ -457,8 +559,134 @@ export default function EditPostPage() {
   const canSave = title.trim().length > 0 && platforms.length > 0;
   const canSchedule = canSave && scheduleDate !== '' && scheduleTime !== '';
 
+  // ── Save draft ─────────────────────────────────────────────────────────────
+  async function handleSaveDraft(): Promise<void> {
+    if (!post || !canSave) return;
+    setSaving(true);
+    try {
+      const platformContentsPayload: Record<string, string> = {};
+      platforms.forEach((p) => { platformContentsPayload[p] = getContentFor(p); });
+      await apiClient.patch(`/posts/${post.id}`, {
+        title: title.trim(),
+        content: getContentFor(platforms[0] ?? 'twitter'),
+        platforms,
+        platformContents: platformContentsPayload,
+        clientId: clientId || undefined,
+        timezone,
+      });
+      setToast({ message: 'Draft saved', type: 'success' });
+    } catch (err) {
+      console.error('Failed to save draft:', err);
+      setToast({ message: 'Failed to save draft. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Schedule ───────────────────────────────────────────────────────────────
+  async function handleSchedule(): Promise<void> {
+    if (!post || !canSchedule) return;
+    setSaving(true);
+    try {
+      // First save any changes, then schedule
+      const platformContentsPayload: Record<string, string> = {};
+      platforms.forEach((p) => { platformContentsPayload[p] = getContentFor(p); });
+      await apiClient.patch(`/posts/${post.id}`, {
+        title: title.trim(),
+        content: getContentFor(platforms[0] ?? 'twitter'),
+        platforms,
+        platformContents: platformContentsPayload,
+        clientId: clientId || undefined,
+        timezone,
+      });
+      const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
+      await apiClient.post(`/posts/${post.id}/schedule`, { scheduledAt });
+      setToast({ message: 'Post scheduled successfully', type: 'success' });
+      void fetchPost();
+    } catch (err) {
+      console.error('Failed to schedule post:', err);
+      setToast({ message: 'Failed to schedule post. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Publish now ────────────────────────────────────────────────────────────
+  async function handlePublishNow(): Promise<void> {
+    if (!post || !canSave) return;
+    setSaving(true);
+    try {
+      const platformContentsPayload: Record<string, string> = {};
+      platforms.forEach((p) => { platformContentsPayload[p] = getContentFor(p); });
+      await apiClient.patch(`/posts/${post.id}`, {
+        title: title.trim(),
+        content: getContentFor(platforms[0] ?? 'twitter'),
+        platforms,
+        platformContents: platformContentsPayload,
+        clientId: clientId || undefined,
+        timezone,
+      });
+      await apiClient.post(`/posts/${post.id}/publish-now`);
+      setToast({ message: 'Post published!', type: 'success' });
+      void fetchPost();
+    } catch (err) {
+      console.error('Failed to publish post:', err);
+      setToast({ message: 'Failed to publish post. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Delete ─────────────────────────────────────────────────────────────────
+  async function handleDelete(): Promise<void> {
+    if (!post) return;
+    setSaving(true);
+    try {
+      await apiClient.delete(`/posts/${post.id}`);
+      router.push('/dashboard/posts');
+    } catch (err) {
+      console.error('Failed to delete post:', err);
+      setToast({ message: 'Failed to delete post. Please try again.', type: 'error' });
+      setDeleteOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Loading / error states ────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (error || !post) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <AlertCircle className="h-10 w-10 text-red-400" />
+        <p className="text-slate-600">{error ?? 'Post not found.'}</p>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => void fetchPost()}>Retry</Button>
+          <Link href="/dashboard/posts">
+            <Button variant="outline">Back to Posts</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -491,7 +719,7 @@ export default function EditPostPage() {
             <CardContent className="pt-5 space-y-4">
               <Input label="Post Title" placeholder="Give this post a title…" value={title} onChange={(e) => setTitle(e.target.value)} disabled={isPublished} hint="Internal only — not shown on platforms." />
               <div className="grid grid-cols-2 gap-3">
-                <Select label="Client" value={clientId} onChange={(e) => setClientId(e.target.value)} options={CLIENT_OPTIONS} disabled={isPublished} />
+                <Select label="Client" value={clientId} onChange={(e) => setClientId(e.target.value)} options={clientOptions} disabled={isPublished} />
                 <Select label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} options={TZ_OPTIONS} disabled={isPublished} />
               </div>
               {!isPublished && (
@@ -501,7 +729,6 @@ export default function EditPostPage() {
                 </div>
               )}
 
-              {/* Media — integrated */}
               <div className="border-t border-slate-100 pt-4">
                 <p className="text-sm font-medium text-slate-700 mb-2">Media</p>
                 {isPublished ? (
@@ -610,14 +837,17 @@ export default function EditPostPage() {
               </Link>
               {!isPublished && (
                 <>
-                  <Button variant="outline" size="sm" disabled={!canSave} onClick={() => alert('Draft saved! (mock)')}>
-                    <FileText className="h-4 w-4" /> Save Draft
+                  <Button variant="outline" size="sm" disabled={!canSave || saving} onClick={() => void handleSaveDraft()}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                    Save Draft
                   </Button>
-                  <Button variant="outline" size="sm" disabled={!canSchedule} onClick={() => alert('Post scheduled! (mock)')}>
-                    <Clock className="h-4 w-4" /> Schedule
+                  <Button variant="outline" size="sm" disabled={!canSchedule || saving} onClick={() => void handleSchedule()}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                    Schedule
                   </Button>
-                  <Button size="sm" disabled={!canSave} onClick={() => alert('Publishing! (mock)')}>
-                    <Send className="h-4 w-4" /> Publish Now
+                  <Button size="sm" disabled={!canSave || saving} onClick={() => void handlePublishNow()}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Publish Now
                   </Button>
                 </>
               )}
@@ -630,7 +860,9 @@ export default function EditPostPage() {
       <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete Post" description="This will permanently remove the post and all platform versions. This cannot be undone.">
         <DialogFooter>
           <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
-          <Button variant="destructive" onClick={() => { setDeleteOpen(false); router.push('/dashboard/posts'); }}>Delete Post</Button>
+          <Button variant="destructive" disabled={saving} onClick={() => void handleDelete()}>
+            {saving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...</> : 'Delete Post'}
+          </Button>
         </DialogFooter>
       </Dialog>
 
@@ -643,7 +875,6 @@ export default function EditPostPage() {
           sourcePlatform={crossPostSource.platform}
           existingPlatforms={platforms}
           onConfirm={(targets, newContents) => {
-            // Add new platforms + their adapted contents
             setPlatforms((prev) => [...prev, ...targets]);
             setContents((prev) => ({ ...prev, ...newContents }));
           }}
