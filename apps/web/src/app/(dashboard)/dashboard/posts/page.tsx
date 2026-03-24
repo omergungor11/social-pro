@@ -396,15 +396,21 @@ export default function PostsPage(): React.JSX.Element {
         `/posts?${params.toString()}`
       );
 
-      // Handle both paginated shape { items, total, ... } and raw array fallback
+      // apiClient unwraps the outer {data} wrapper from ResponseInterceptor
+      // PaginatedResponseDto returns {data: T[], meta: {page, limit, total}}
+      // So response is either: {data: [...], meta: {...}} or a raw array
+      let items: ApiPostRaw[];
       if (Array.isArray(response)) {
-        setPosts((response as ApiPostRaw[]).map(mapApiPost));
-        setTotalCount((response as ApiPostRaw[]).length);
+        items = response as ApiPostRaw[];
+        setTotalCount(items.length);
       } else {
-        const paginated = response as PaginatedApiResponse<ApiPostRaw>;
-        setPosts((paginated.items ?? []).map(mapApiPost));
-        setTotalCount(paginated.total ?? 0);
+        const paginated = response as Record<string, unknown>;
+        const rawItems = (paginated.data ?? paginated.items ?? []) as ApiPostRaw[];
+        items = rawItems;
+        const meta = paginated.meta as { total?: number } | undefined;
+        setTotalCount(meta?.total ?? rawItems.length);
       }
+      setPosts(items.map(mapApiPost));
     } catch (err) {
       console.error('Failed to fetch posts:', err);
       setError('Failed to load posts. Please try again.');

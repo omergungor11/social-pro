@@ -108,7 +108,7 @@ export class PostService {
           },
           client: { select: { id: true, name: true } },
         },
-        orderBy: [{ scheduledAt: "desc" }, { createdAt: "desc" }],
+        orderBy: [{ createdAt: "desc" }],
         skip,
         take: limit,
       }),
