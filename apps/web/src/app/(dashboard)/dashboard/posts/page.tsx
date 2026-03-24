@@ -76,7 +76,7 @@ function mapApiPost(a: ApiPost): Post {
   return {
     id: a.id,
     title: a.title || 'Untitled Post',
-    content: a.content,
+    content: typeof a.content === 'object' && a.content !== null ? (a.content as Record<string, unknown>).text as string ?? JSON.stringify(a.content) : (a.content ?? ''),
     platforms: (a.platforms ?? []).map((p) => p.toLowerCase()) as Platform[],
     status: (a.status.toLowerCase()) as PostStatus,
     scheduledAt: a.scheduledAt,

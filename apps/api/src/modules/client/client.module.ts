@@ -8,7 +8,7 @@ import { BulkOperationService } from "./bulk-operation.service";
 
 @Module({
   imports: [PrismaModule],
-  controllers: [ClientController, ClientGroupController],
+  controllers: [ClientGroupController, ClientController],
   providers: [ClientService, ClientGroupService, BulkOperationService],
   exports: [ClientService, ClientGroupService, BulkOperationService],
 })
