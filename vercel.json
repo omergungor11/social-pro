@@ -1,6 +1,6 @@
 {
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm --filter @social-pro/prisma exec prisma generate && pnpm --filter web build",
+  "buildCommand": "DATABASE_URL=postgresql://fake:fake@localhost:5432/fake npx prisma generate --schema=packages/prisma/prisma/schema.prisma && pnpm --filter web build",
   "outputDirectory": "apps/web/.next",
   "framework": "nextjs"
 }
