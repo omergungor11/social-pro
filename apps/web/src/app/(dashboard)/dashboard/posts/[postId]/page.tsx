@@ -595,10 +595,22 @@ function PlatformContentPanel({
   }, [platforms, activeTab]);
 
   if (platforms.length === 0) {
+    // No platforms — still show content as a generic text block
+    const genericContent = Object.values(contents)[0] ?? '';
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center">
-        <p className="text-sm text-slate-400">No platforms selected for this post.</p>
-      </div>
+      <Card>
+        <CardContent className="p-5 space-y-3">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Content</p>
+          {genericContent ? (
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{genericContent}</p>
+          ) : (
+            <p className="text-sm text-slate-400 italic">No content yet.</p>
+          )}
+          {!disabled && (
+            <p className="text-xs text-slate-400 mt-2">Select platforms above to customize content per platform.</p>
+          )}
+        </CardContent>
+      </Card>
     );
   }
 
@@ -1209,9 +1221,14 @@ export default function PostDetailPage(): React.JSX.Element {
       setTitle(mapped.title);
 
       const initContents: Record<string, string> = {};
-      mapped.platforms.forEach((p) => {
-        initContents[p] = mapped.content;
-      });
+      if (mapped.platforms.length > 0) {
+        mapped.platforms.forEach((p) => {
+          initContents[p] = mapped.content;
+        });
+      } else {
+        // No platforms — store content under a generic key so it's still accessible
+        initContents['_default'] = mapped.content;
+      }
       setContents(initContents);
 
       if (mapped.scheduledAt) {
