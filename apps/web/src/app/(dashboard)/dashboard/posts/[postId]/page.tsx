@@ -1187,6 +1187,9 @@ export default function PostDetailPage(): React.JSX.Element {
   const [scheduleTime, setScheduleTime] = React.useState('09:00');
   const [uploadedFiles, setUploadedFiles] = React.useState<UploadedFile[]>([]);
 
+  // Social accounts for target selection
+  const [socialAccounts, setSocialAccounts] = React.useState<Array<{ id: string; platform: string; displayName: string | null }>>([]);
+
   // Dialog state
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
@@ -1233,6 +1236,10 @@ export default function PostDetailPage(): React.JSX.Element {
 
   React.useEffect(() => {
     void fetchPost();
+    // Fetch social accounts for platform target selection
+    apiClient.get<Array<{ id: string; platform: string; displayName: string | null; platformUsername: string | null }>>('/social-accounts')
+      .then((accounts) => setSocialAccounts(accounts.map((a) => ({ id: a.id, platform: (a.platform ?? '').toLowerCase(), displayName: a.displayName ?? a.platformUsername ?? 'Unknown' }))))
+      .catch(() => { /* non-fatal */ });
   }, [fetchPost]);
 
   function showToast(message: string, type: 'success' | 'error'): void {
@@ -1261,10 +1268,25 @@ export default function PostDetailPage(): React.JSX.Element {
   // ── Build patch payload ────────────────────────────────────────────────────
   function buildPatchPayload(): Record<string, unknown> {
     const firstPlatform = post?.platforms?.[0] ?? 'twitter';
-    return {
+    const contentText = contents[firstPlatform] ?? post?.content ?? '';
+
+    // Build targets from connected social accounts matching selected platforms
+    const platformSet = new Set(Object.keys(contents).length > 0 ? Object.keys(contents) : post?.platforms ?? []);
+    const targets = socialAccounts
+      .filter((a) => platformSet.has(a.platform))
+      .map((a) => ({ socialAccountId: a.id }));
+
+    const payload: Record<string, unknown> = {
       title: title.trim(),
-      content: contents[firstPlatform] ?? post?.content ?? '',
+      content: { text: contentText },
     };
+
+    // Only send targets if we have social accounts to map
+    if (targets.length > 0) {
+      payload.targets = targets;
+    }
+
+    return payload;
   }
 
   // ── Save draft ─────────────────────────────────────────────────────────────
@@ -1673,6 +1695,62 @@ export default function PostDetailPage(): React.JSX.Element {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: content editor */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Platform selector (editable only) */}
+            {isEditable && socialAccounts.length > 0 && (
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Target Platforms</p>
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_PLATFORMS_LIST.map((p) => {
+                      const hasAccount = socialAccounts.some((a) => a.platform === p);
+                      const isSelected = Object.keys(contents).includes(p) || post.platforms.includes(p);
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          disabled={!hasAccount}
+                          onClick={() => {
+                            if (isSelected) {
+                              // Remove platform
+                              setContents((prev) => {
+                                const next = { ...prev };
+                                delete next[p];
+                                return next;
+                              });
+                              setPost((prev) => prev ? { ...prev, platforms: prev.platforms.filter((x) => x !== p) } : prev);
+                            } else {
+                              // Add platform with current content
+                              const currentContent = Object.values(contents)[0] ?? post.content ?? '';
+                              const limit = PLATFORM_CHAR_LIMITS[p];
+                              const adapted = currentContent.length > limit ? currentContent.slice(0, limit - 3) + '...' : currentContent;
+                              setContents((prev) => ({ ...prev, [p]: adapted }));
+                              setPost((prev) => prev ? { ...prev, platforms: [...prev.platforms, p] } : prev);
+                            }
+                          }}
+                          className={cn(
+                            'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all',
+                            isSelected
+                              ? 'border-blue-300 bg-blue-50 text-blue-800 font-medium shadow-sm'
+                              : hasAccount
+                                ? 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                                : 'border-slate-100 text-slate-300 cursor-not-allowed opacity-50'
+                          )}
+                          title={!hasAccount ? `No ${getPlatformLabel(p)} account connected` : isSelected ? `Remove ${getPlatformLabel(p)}` : `Add ${getPlatformLabel(p)}`}
+                        >
+                          <PlatformIcon platform={p} size="sm" className={!hasAccount ? 'grayscale' : ''} />
+                          {getPlatformLabel(p)}
+                          {isSelected && <CheckCircle2 className="h-3.5 w-3.5 text-blue-500" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {socialAccounts.length === 0 && (
+                    <p className="text-xs text-slate-400 mt-2">No social accounts connected. <Link href="/dashboard/social-accounts" className="text-blue-600 hover:underline">Connect accounts</Link></p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Platform content panel */}
             <PlatformContentPanel
               platforms={post.platforms}
