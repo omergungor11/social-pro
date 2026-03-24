@@ -93,6 +93,27 @@ export default function LoginPage(): React.JSX.Element {
     }
   }
 
+  // Dev quick-login handler
+  async function handleDevLogin(): Promise<void> {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const tokens = await apiClient.post<AuthTokens>("/auth/login", {
+        email: DEV_EMAIL,
+        password: DEV_PASSWORD,
+      });
+      localStorage.setItem("sp_access_token", tokens.accessToken);
+      if (tokens.refreshToken) {
+        localStorage.setItem("sp_refresh_token", tokens.refreshToken);
+      }
+      router.push("/dashboard");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Dev login failed";
+      setError(message);
+      setIsSubmitting(false);
+    }
+  }
+
   // Dev auto-login loading state
   if (devLogging) {
     return (
@@ -113,6 +134,19 @@ export default function LoginPage(): React.JSX.Element {
           Sign in to your Social Pro account
         </p>
       </div>
+
+      {/* Dev mode quick login button */}
+      {DEV_MODE && (
+        <button
+          type="button"
+          onClick={() => void handleDevLogin()}
+          disabled={isSubmitting}
+          className="w-full flex items-center justify-center gap-2 h-11 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+        >
+          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Dev Login (admin@socialpro.dev)
+        </button>
+      )}
 
       {error !== null && (
         <div

@@ -77,7 +77,7 @@ function mapApiPost(a: ApiPost): Post {
     id: a.id,
     title: a.title || 'Untitled Post',
     content: a.content,
-    platforms: a.platforms.map((p) => p.toLowerCase()) as Platform[],
+    platforms: (a.platforms ?? []).map((p) => p.toLowerCase()) as Platform[],
     status: (a.status.toLowerCase()) as PostStatus,
     scheduledAt: a.scheduledAt,
     clientId: a.clientId ?? '',
