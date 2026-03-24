@@ -677,21 +677,30 @@ export default function PostsPage(): React.JSX.Element {
 
                       return (
                         <TableRow key={post.id} className={cn(isDuplicating && 'opacity-50')}>
-                          {/* Post — title + content preview */}
+                          {/* Post — title + content preview + edit icon */}
                           <TableCell>
-                            <Link
-                              href={`/dashboard/posts/${post.id}`}
-                              className="block max-w-[300px] group"
-                            >
-                              <p className="truncate text-sm font-medium text-slate-900 group-hover:text-blue-600 transition-colors">
-                                {post.title}
-                              </p>
-                              {post.content && (
-                                <p className="mt-0.5 truncate text-xs text-slate-400">
-                                  {post.content}
+                            <div className="flex items-start gap-2 max-w-[340px]">
+                              <Link
+                                href={`/dashboard/posts/${post.id}`}
+                                className="flex-1 min-w-0 group"
+                              >
+                                <p className="truncate text-sm font-medium text-slate-900 group-hover:text-blue-600 transition-colors">
+                                  {post.title}
                                 </p>
-                              )}
-                            </Link>
+                                {post.content && (
+                                  <p className="mt-0.5 text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                                    {post.content.length > 120 ? post.content.slice(0, 120) + '...' : post.content}
+                                  </p>
+                                )}
+                              </Link>
+                              <Link
+                                href={`/dashboard/posts/${post.id}`}
+                                className="mt-0.5 shrink-0 rounded-md p-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                title="Edit post"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Link>
+                            </div>
                           </TableCell>
 
                           {/* Platforms */}
