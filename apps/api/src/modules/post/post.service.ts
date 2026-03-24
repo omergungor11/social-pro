@@ -37,7 +37,7 @@ export type PostFull = Post & {
   approvals: PostApproval[];
 };
 
-type PostTargetListItem = Pick<PostTarget, "id" | "platform" | "status" | "publishedAt"> & {
+type PostTargetListItem = Pick<PostTarget, "id" | "status" | "publishedAt"> & {
   socialAccount: Pick<SocialAccount, "platform" | "displayName"> | null;
 };
 
@@ -104,7 +104,7 @@ export class PostService {
         include: {
           _count: { select: { targets: true, media: true } },
           targets: {
-            select: { id: true, platform: true, status: true, publishedAt: true, socialAccount: { select: { platform: true, displayName: true } } },
+            select: { id: true, status: true, publishedAt: true, socialAccount: { select: { platform: true, displayName: true } } },
           },
           client: { select: { id: true, name: true } },
         },
