@@ -14,3 +14,4 @@ coverage/
 __MACOSX/
 *Zone.Identifier*
 claude-start-template/
+.vercel

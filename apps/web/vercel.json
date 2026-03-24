@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "installCommand": "cd ../.. && pnpm install",
+  "buildCommand": "cd ../.. && pnpm --filter @social-pro/prisma exec prisma generate && pnpm --filter web build",
+  "outputDirectory": ".next"
+}
