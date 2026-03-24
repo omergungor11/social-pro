@@ -40,6 +40,10 @@ import {
 import { CalendarView, type Post, type PostStatus } from '@/components/posts/calendar-view';
 import { apiClient } from '@/lib/api-client';
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -47,19 +51,50 @@ function fmtNum(n: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// API shapes
+// Raw API shapes
+// The list endpoint returns PaginatedResponseDto: { items, total, page, limit }
+// Each item is a Post with _count: { targets, media }
+// The findOne endpoint returns PostFull with targets[].socialAccount.platform
 // ---------------------------------------------------------------------------
 
-interface ApiPost {
+interface ApiPostTarget {
+  id?: string;
+  platform?: string;
+  socialAccount?: {
+    id?: string;
+    platform?: string;
+    platformUsername?: string;
+    displayName?: string;
+  };
+}
+
+interface ApiPostClient {
+  id?: string;
+  name?: string;
+}
+
+interface ApiPostRaw {
   id: string;
-  title: string;
-  content: string;
-  platforms: string[];
-  status: string;
-  scheduledAt: string | null;
-  clientId: string | null;
-  client?: { id: string; name: string } | null;
-  createdAt: string;
+  title?: string | null;
+  content?: unknown;
+  status?: string | null;
+  scheduledAt?: string | null;
+  publishedAt?: string | null;
+  clientId?: string | null;
+  client?: ApiPostClient | null;
+  createdAt?: string;
+  // list items have _count
+  _count?: {
+    targets?: number;
+    media?: number;
+    likes?: number;
+    comments?: number;
+    impressions?: number;
+  };
+  // detail items have full targets array
+  targets?: ApiPostTarget[];
+  // some endpoints may return platforms directly
+  platforms?: string[];
   metrics?: {
     likes?: number;
     comments?: number;
@@ -68,21 +103,51 @@ interface ApiPost {
   } | null;
 }
 
+interface PaginatedApiResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 // ---------------------------------------------------------------------------
-// Map API post to frontend Post shape
+// Map raw API post → frontend Post shape
+// SAFE: all field accesses use ?? fallbacks
 // ---------------------------------------------------------------------------
 
-function mapApiPost(a: ApiPost): Post {
+function mapApiPost(a: ApiPostRaw): Post {
+  // Resolve platform list from multiple possible shapes
+  let platforms: Platform[] = [];
+
+  if (Array.isArray(a.targets) && a.targets.length > 0) {
+    platforms = (a.targets as ApiPostTarget[])
+      .map((t) => (t.socialAccount?.platform ?? t.platform ?? '').toLowerCase())
+      .filter((p): p is Platform => p.length > 0) as Platform[];
+  } else if (Array.isArray(a.platforms) && a.platforms.length > 0) {
+    platforms = (a.platforms as string[])
+      .map((p) => p.toLowerCase())
+      .filter((p): p is Platform => p.length > 0) as Platform[];
+  }
+
+  // Resolve content text safely
+  let contentText = '';
+  if (typeof a.content === 'object' && a.content !== null) {
+    const c = a.content as Record<string, unknown>;
+    contentText = typeof c['text'] === 'string' ? c['text'] : JSON.stringify(a.content);
+  } else if (typeof a.content === 'string') {
+    contentText = a.content;
+  }
+
   return {
     id: a.id,
-    title: a.title || 'Untitled Post',
-    content: typeof a.content === 'object' && a.content !== null ? (a.content as Record<string, unknown>).text as string ?? JSON.stringify(a.content) : (a.content ?? ''),
-    platforms: (a.platforms ?? []).map((p) => p.toLowerCase()) as Platform[],
-    status: (a.status.toLowerCase()) as PostStatus,
-    scheduledAt: a.scheduledAt,
+    title: a.title ?? 'Untitled Post',
+    content: contentText,
+    platforms,
+    status: ((a.status ?? 'DRAFT').toLowerCase()) as PostStatus,
+    scheduledAt: a.scheduledAt ?? null,
     clientId: a.clientId ?? '',
     clientName: a.client?.name ?? '',
-    createdAt: a.createdAt,
+    createdAt: a.createdAt ?? new Date().toISOString(),
     metrics: a.metrics
       ? {
           likes: a.metrics.likes ?? 0,
@@ -114,6 +179,8 @@ function Toast({
 
   return (
     <div
+      role="status"
+      aria-live="polite"
       className={cn(
         'fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg',
         type === 'success'
@@ -122,11 +189,19 @@ function Toast({
       )}
     >
       {type === 'success' ? (
-        <CheckCircle2 className="h-4 w-4" />
+        <CheckCircle2 className="h-4 w-4 shrink-0" />
       ) : (
-        <AlertCircle className="h-4 w-4" />
+        <AlertCircle className="h-4 w-4 shrink-0" />
       )}
       {message}
+      <button
+        type="button"
+        onClick={onClose}
+        className="ml-2 opacity-60 hover:opacity-100 transition-opacity"
+        aria-label="Dismiss"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
@@ -137,21 +212,21 @@ function Toast({
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'scheduled', label: 'Scheduled' },
-  { value: 'published', label: 'Published' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'SCHEDULED', label: 'Scheduled' },
+  { value: 'PUBLISHED', label: 'Published' },
+  { value: 'FAILED', label: 'Failed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
 ];
 
 const PLATFORM_OPTIONS = [
   { value: '', label: 'All Platforms' },
-  { value: 'twitter', label: 'Twitter / X' },
-  { value: 'facebook', label: 'Facebook' },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'linkedin', label: 'LinkedIn' },
-  { value: 'tiktok', label: 'TikTok' },
-  { value: 'youtube', label: 'YouTube' },
+  { value: 'TWITTER', label: 'Twitter / X' },
+  { value: 'FACEBOOK', label: 'Facebook' },
+  { value: 'INSTAGRAM', label: 'Instagram' },
+  { value: 'LINKEDIN', label: 'LinkedIn' },
+  { value: 'TIKTOK', label: 'TikTok' },
+  { value: 'YOUTUBE', label: 'YouTube' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -170,7 +245,7 @@ const STATUS_BADGE: Record<PostStatus, {
 };
 
 // ---------------------------------------------------------------------------
-// Row actions menu
+// Row actions dropdown
 // ---------------------------------------------------------------------------
 
 interface RowActionsProps {
@@ -224,6 +299,7 @@ function RowActions({ postId, onDelete, onDuplicate }: RowActionsProps): React.J
             <Copy className="h-3.5 w-3.5 text-slate-400" />
             Duplicate
           </button>
+          <div className="my-1 border-t border-slate-100" />
           <button
             type="button"
             onClick={() => { onDelete(postId); setOpen(false); }}
@@ -239,11 +315,52 @@ function RowActions({ postId, onDelete, onDuplicate }: RowActionsProps): React.J
 }
 
 // ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
+
+function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () => void }): React.JSX.Element {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+        <svg viewBox="0 0 24 24" className="h-8 w-8 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+        </svg>
+      </div>
+      {hasFilters ? (
+        <>
+          <p className="text-sm font-medium text-slate-700">No posts match your filters</p>
+          <p className="mt-1 text-xs text-slate-400">Try adjusting your search or filter criteria.</p>
+          <button
+            type="button"
+            onClick={onClear}
+            className="mt-4 text-sm text-blue-600 hover:text-blue-800 transition-colors underline underline-offset-2"
+          >
+            Clear filters
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm font-medium text-slate-700">No posts yet</p>
+          <p className="mt-1 text-xs text-slate-400">Create your first post to get started.</p>
+          <Link href="/dashboard/posts/new" className="mt-4">
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              Create Post
+            </Button>
+          </Link>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page component
 // ---------------------------------------------------------------------------
 
 export default function PostsPage(): React.JSX.Element {
   const [posts, setPosts] = React.useState<Post[]>([]);
+  const [totalCount, setTotalCount] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -258,19 +375,36 @@ export default function PostsPage(): React.JSX.Element {
   // Dialogs
   const [deleteTargetId, setDeleteTargetId] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [duplicatingId, setDuplicatingId] = React.useState<string | null>(null);
 
-  // ── Fetch posts ───────────────────────────────────────────────────────────
+  // ── Fetch posts ────────────────────────────────────────────────────────────
   const fetchPosts = React.useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+
       const params = new URLSearchParams();
       params.set('limit', '100');
+      params.set('page', '1');
       if (statusFilter) params.set('status', statusFilter);
       if (platformFilter) params.set('platform', platformFilter);
       if (clientFilter) params.set('clientId', clientFilter);
-      const data = await apiClient.get<ApiPost[]>(`/posts?${params.toString()}`);
-      setPosts(data.map(mapApiPost));
+
+      // The API wraps the paginated response in { data: { items, total, page, limit } }
+      // apiClient.get already unwraps the outer { data } envelope
+      const response = await apiClient.get<PaginatedApiResponse<ApiPostRaw> | ApiPostRaw[]>(
+        `/posts?${params.toString()}`
+      );
+
+      // Handle both paginated shape { items, total, ... } and raw array fallback
+      if (Array.isArray(response)) {
+        setPosts((response as ApiPostRaw[]).map(mapApiPost));
+        setTotalCount((response as ApiPostRaw[]).length);
+      } else {
+        const paginated = response as PaginatedApiResponse<ApiPostRaw>;
+        setPosts((paginated.items ?? []).map(mapApiPost));
+        setTotalCount(paginated.total ?? 0);
+      }
     } catch (err) {
       console.error('Failed to fetch posts:', err);
       setError('Failed to load posts. Please try again.');
@@ -283,18 +417,19 @@ export default function PostsPage(): React.JSX.Element {
     void fetchPosts();
   }, [fetchPosts]);
 
-  // ── Derived filtered list (client-side search only) ───────────────────────
+  // ── Client-side search filter ──────────────────────────────────────────────
   const filtered = React.useMemo(() => {
     const q = search.toLowerCase().trim();
     if (!q) return posts;
-    return posts.filter((p) =>
-      p.title.toLowerCase().includes(q) ||
-      p.clientName.toLowerCase().includes(q) ||
-      p.content.toLowerCase().includes(q)
+    return posts.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        (p.clientName ?? '').toLowerCase().includes(q) ||
+        p.content.toLowerCase().includes(q)
     );
   }, [posts, search]);
 
-  // ── Client filter options derived from loaded posts ───────────────────────
+  // ── Client filter options derived from loaded posts ────────────────────────
   const clientOptions = React.useMemo(() => {
     const seen = new Map<string, string>();
     posts.forEach((p) => {
@@ -308,14 +443,15 @@ export default function PostsPage(): React.JSX.Element {
     ];
   }, [posts]);
 
-  // ── Delete ────────────────────────────────────────────────────────────────
+  // ── Delete ─────────────────────────────────────────────────────────────────
   async function handleDelete(id: string): Promise<void> {
     setDeleting(true);
     try {
       await apiClient.delete(`/posts/${id}`);
       setPosts((prev) => prev.filter((p) => p.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
       setDeleteTargetId(null);
-      setToast({ message: 'Post deleted', type: 'success' });
+      setToast({ message: 'Post deleted successfully.', type: 'success' });
     } catch (err) {
       console.error('Failed to delete post:', err);
       setToast({ message: 'Failed to delete post. Please try again.', type: 'error' });
@@ -325,26 +461,30 @@ export default function PostsPage(): React.JSX.Element {
     }
   }
 
-  // ── Duplicate (optimistic local copy, then create via API) ────────────────
+  // ── Duplicate ──────────────────────────────────────────────────────────────
   async function handleDuplicate(id: string): Promise<void> {
     const original = posts.find((p) => p.id === id);
     if (!original) return;
+    setDuplicatingId(id);
     try {
-      const created = await apiClient.post<ApiPost>('/posts', {
+      const created = await apiClient.post<ApiPostRaw>('/posts', {
         title: `${original.title} (Copy)`,
-        content: original.content,
-        platforms: original.platforms,
+        content: { text: original.content },
         clientId: original.clientId || undefined,
+        // No targets — draft starts without social account targets
       });
       setPosts((prev) => [mapApiPost(created), ...prev]);
-      setToast({ message: 'Post duplicated', type: 'success' });
+      setTotalCount((prev) => prev + 1);
+      setToast({ message: 'Post duplicated as draft.', type: 'success' });
     } catch (err) {
       console.error('Failed to duplicate post:', err);
       setToast({ message: 'Failed to duplicate post. Please try again.', type: 'error' });
+    } finally {
+      setDuplicatingId(null);
     }
   }
 
-  const hasFilters = search || statusFilter || platformFilter || clientFilter;
+  const hasFilters = Boolean(search || statusFilter || platformFilter || clientFilter);
 
   function clearFilters(): void {
     setSearch('');
@@ -355,7 +495,7 @@ export default function PostsPage(): React.JSX.Element {
 
   return (
     <>
-      {toast && (
+      {toast !== null && (
         <Toast
           message={toast.message}
           type={toast.type}
@@ -371,7 +511,9 @@ export default function PostsPage(): React.JSX.Element {
             <p className="mt-0.5 text-sm text-slate-500">
               {loading
                 ? 'Loading posts...'
-                : `${filtered.length} of ${posts.length} post${posts.length !== 1 ? 's' : ''}`}
+                : hasFilters
+                ? `${filtered.length} of ${totalCount} post${totalCount !== 1 ? 's' : ''}`
+                : `${totalCount} post${totalCount !== 1 ? 's' : ''}`}
             </p>
           </div>
           <Link href="/dashboard/posts/new">
@@ -383,14 +525,14 @@ export default function PostsPage(): React.JSX.Element {
         </div>
 
         {/* Error state */}
-        {error && (
+        {error !== null && (
           <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            {error}
+            <span>{error}</span>
             <button
               type="button"
               onClick={() => void fetchPosts()}
-              className="ml-auto text-xs underline hover:no-underline"
+              className="ml-auto shrink-0 text-xs underline hover:no-underline"
             >
               Retry
             </button>
@@ -400,7 +542,7 @@ export default function PostsPage(): React.JSX.Element {
         {/* View toggle + filters */}
         <div className="flex flex-wrap items-end gap-3">
           {/* View toggle */}
-          <div className="flex rounded-lg border border-slate-200 bg-white p-1 gap-0.5">
+          <div className="flex rounded-lg border border-slate-200 bg-white p-1 gap-0.5 shrink-0">
             <button
               type="button"
               onClick={() => setView('list')}
@@ -410,6 +552,7 @@ export default function PostsPage(): React.JSX.Element {
                   ? 'bg-slate-900 text-white shadow-sm'
                   : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
               )}
+              aria-pressed={view === 'list'}
             >
               <List className="h-4 w-4" />
               List
@@ -423,6 +566,7 @@ export default function PostsPage(): React.JSX.Element {
                   ? 'bg-slate-900 text-white shadow-sm'
                   : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
               )}
+              aria-pressed={view === 'calendar'}
             >
               <CalendarDays className="h-4 w-4" />
               Calendar
@@ -431,14 +575,15 @@ export default function PostsPage(): React.JSX.Element {
 
           {/* Search */}
           <div className="relative min-w-[180px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
             <input
-              type="text"
-              placeholder="Search posts…"
+              type="search"
+              placeholder="Search posts..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search posts"
               className={cn(
-                'flex h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 py-2',
+                'flex h-10 w-full rounded-md border border-input bg-background pl-9 pr-9 py-2',
                 'text-sm placeholder:text-muted-foreground',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
               )}
@@ -456,7 +601,7 @@ export default function PostsPage(): React.JSX.Element {
           </div>
 
           {/* Status filter */}
-          <div className="w-40">
+          <div className="w-40 shrink-0">
             <Select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -466,7 +611,7 @@ export default function PostsPage(): React.JSX.Element {
           </div>
 
           {/* Platform filter */}
-          <div className="w-44">
+          <div className="w-44 shrink-0">
             <Select
               value={platformFilter}
               onChange={(e) => setPlatformFilter(e.target.value)}
@@ -476,21 +621,23 @@ export default function PostsPage(): React.JSX.Element {
           </div>
 
           {/* Client filter */}
-          <div className="w-48">
-            <Select
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
-              options={clientOptions}
-              aria-label="Filter by client"
-            />
-          </div>
+          {clientOptions.length > 1 && (
+            <div className="w-48 shrink-0">
+              <Select
+                value={clientFilter}
+                onChange={(e) => setClientFilter(e.target.value)}
+                options={clientOptions}
+                aria-label="Filter by client"
+              />
+            </div>
+          )}
 
           {/* Clear filters */}
           {hasFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 transition-colors"
+              className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 transition-colors shrink-0"
             >
               <X className="h-3.5 w-3.5" />
               Clear
@@ -505,62 +652,64 @@ export default function PostsPage(): React.JSX.Element {
           </div>
         ) : (
           <>
-            {/* ── LIST VIEW ─────────────────────────────────────────────────── */}
+            {/* LIST VIEW */}
             {view === 'list' && (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Post</TableHead>
-                    <TableHead className="hidden sm:table-cell">Platforms</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="hidden md:table-cell">Performance</TableHead>
-                    <TableHead className="hidden lg:table-cell">Scheduled</TableHead>
-                    <TableHead className="hidden xl:table-cell">Client</TableHead>
-                    <TableHead className="w-12" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.length === 0 ? (
+              filtered.length === 0 ? (
+                <EmptyState hasFilters={hasFilters} onClear={clearFilters} />
+              ) : (
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={7} className="py-16 text-center text-slate-400">
-                        {hasFilters
-                          ? 'No posts match your filters.'
-                          : 'No posts yet. Create your first post to get started.'}
-                      </TableCell>
+                      <TableHead>Post</TableHead>
+                      <TableHead className="hidden sm:table-cell">Platforms</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="hidden md:table-cell">Engagement</TableHead>
+                      <TableHead className="hidden lg:table-cell">Scheduled</TableHead>
+                      <TableHead className="hidden xl:table-cell">Client</TableHead>
+                      <TableHead className="w-12" />
                     </TableRow>
-                  ) : (
-                    filtered.map((post) => {
-                      const statusCfg = STATUS_BADGE[post.status] ?? STATUS_BADGE['draft'];
+                  </TableHeader>
+                  <TableBody>
+                    {filtered.map((post) => {
+                      const statusCfg = STATUS_BADGE[post.status] ?? STATUS_BADGE.draft;
                       const m = post.metrics;
+                      const isDuplicating = duplicatingId === post.id;
+
                       return (
-                        <TableRow key={post.id}>
+                        <TableRow key={post.id} className={cn(isDuplicating && 'opacity-50')}>
                           {/* Post — title + content preview */}
                           <TableCell>
                             <Link
                               href={`/dashboard/posts/${post.id}`}
-                              className="block max-w-[320px] group"
+                              className="block max-w-[300px] group"
                             >
                               <p className="truncate text-sm font-medium text-slate-900 group-hover:text-blue-600 transition-colors">
                                 {post.title}
                               </p>
-                              <p className="mt-0.5 truncate text-xs text-slate-400 line-clamp-1">
-                                {post.content}
-                              </p>
+                              {post.content && (
+                                <p className="mt-0.5 truncate text-xs text-slate-400">
+                                  {post.content}
+                                </p>
+                              )}
                             </Link>
                           </TableCell>
 
                           {/* Platforms */}
                           <TableCell className="hidden sm:table-cell">
-                            <div className="flex items-center gap-1">
-                              {post.platforms.slice(0, 4).map((p) => (
-                                <PlatformIcon key={p} platform={p} size="sm" />
-                              ))}
-                              {post.platforms.length > 4 && (
-                                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
-                                  +{post.platforms.length - 4}
-                                </span>
-                              )}
-                            </div>
+                            {post.platforms.length > 0 ? (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {post.platforms.slice(0, 4).map((p) => (
+                                  <PlatformIcon key={p} platform={p} size="sm" />
+                                ))}
+                                {post.platforms.length > 4 && (
+                                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                                    +{post.platforms.length - 4}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-300 text-xs">—</span>
+                            )}
                           </TableCell>
 
                           {/* Status */}
@@ -570,21 +719,25 @@ export default function PostsPage(): React.JSX.Element {
                             </Badge>
                           </TableCell>
 
-                          {/* Performance metrics */}
+                          {/* Engagement metrics */}
                           <TableCell className="hidden md:table-cell">
                             {m ? (
                               <div className="flex items-center gap-3 text-xs text-slate-500">
                                 <span className="flex items-center gap-1" title="Likes">
-                                  <Heart className="h-3 w-3 text-red-400" /> {fmtNum(m.likes)}
+                                  <Heart className="h-3 w-3 text-red-400" />
+                                  {fmtNum(m.likes)}
                                 </span>
                                 <span className="flex items-center gap-1" title="Comments">
-                                  <MessageCircle className="h-3 w-3 text-amber-500" /> {fmtNum(m.comments)}
+                                  <MessageCircle className="h-3 w-3 text-amber-500" />
+                                  {fmtNum(m.comments)}
                                 </span>
                                 <span className="flex items-center gap-1" title="Impressions">
-                                  <Eye className="h-3 w-3 text-blue-500" /> {fmtNum(m.impressions)}
+                                  <Eye className="h-3 w-3 text-blue-500" />
+                                  {fmtNum(m.impressions)}
                                 </span>
                                 <span className="flex items-center gap-1 text-emerald-600 font-medium" title="Engagement Rate">
-                                  <TrendingUp className="h-3 w-3" /> {m.engagementRate}%
+                                  <TrendingUp className="h-3 w-3" />
+                                  {m.engagementRate}%
                                 </span>
                               </div>
                             ) : (
@@ -594,14 +747,16 @@ export default function PostsPage(): React.JSX.Element {
 
                           {/* Scheduled date */}
                           <TableCell className="hidden lg:table-cell text-slate-500 text-xs">
-                            {post.scheduledAt !== null
-                              ? new Date(post.scheduledAt).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                })
-                              : <span className="text-slate-300">—</span>}
+                            {post.scheduledAt !== null ? (
+                              new Date(post.scheduledAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
                           </TableCell>
 
                           {/* Client */}
@@ -609,23 +764,27 @@ export default function PostsPage(): React.JSX.Element {
                             {post.clientName || <span className="text-slate-300">—</span>}
                           </TableCell>
 
-                          {/* Actions */}
+                          {/* Row actions */}
                           <TableCell>
-                            <RowActions
-                              postId={post.id}
-                              onDelete={(id) => setDeleteTargetId(id)}
-                              onDuplicate={(id) => void handleDuplicate(id)}
-                            />
+                            {isDuplicating ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                            ) : (
+                              <RowActions
+                                postId={post.id}
+                                onDelete={(id) => setDeleteTargetId(id)}
+                                onDuplicate={(id) => void handleDuplicate(id)}
+                              />
+                            )}
                           </TableCell>
                         </TableRow>
                       );
-                    })
-                  )}
-                </TableBody>
-              </Table>
+                    })}
+                  </TableBody>
+                </Table>
+              )
             )}
 
-            {/* ── CALENDAR VIEW ─────────────────────────────────────────────── */}
+            {/* CALENDAR VIEW */}
             {view === 'calendar' && (
               <CalendarView
                 posts={filtered}
@@ -643,10 +802,14 @@ export default function PostsPage(): React.JSX.Element {
         open={deleteTargetId !== null}
         onClose={() => setDeleteTargetId(null)}
         title="Delete Post"
-        description="This will permanently remove the post. This action cannot be undone."
+        description="This will permanently remove the post and any associated schedule. This action cannot be undone."
       >
         <DialogFooter>
-          <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
+          <Button
+            variant="outline"
+            onClick={() => setDeleteTargetId(null)}
+            disabled={deleting}
+          >
             Cancel
           </Button>
           <Button
