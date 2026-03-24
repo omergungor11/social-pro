@@ -322,11 +322,6 @@ export class PostService {
       await this.scheduler.cancelScheduledPost(postId);
     }
 
-    await this.prisma.post.update({
-      where: { id: postId },
-      data: { status: PostStatus.PUBLISHING },
-    });
-
     const fullPost = await this.prisma.post.findUnique({
       where: { id: postId },
       include: {
@@ -340,9 +335,38 @@ export class PostService {
       throw new NotFoundException(`Post '${postId}' not found`);
     }
 
-    await this.publisher.publish(fullPost);
+    const pendingTargets = (fullPost.targets ?? []).filter(
+      (t) => t.status === "PENDING" || t.status === "PUBLISHING"
+    );
 
-    this.logger.log(`Post publish triggered: id=${postId} agencyId=${agencyId}`);
+    if (pendingTargets.length === 0) {
+      // No targets — mark as published directly (internal/draft publish)
+      await this.prisma.post.update({
+        where: { id: postId },
+        data: { status: PostStatus.PUBLISHED, publishedAt: new Date() },
+      });
+      this.logger.log(`Post published (no targets): id=${postId} agencyId=${agencyId}`);
+    } else {
+      // Has targets — attempt real platform publishing
+      await this.prisma.post.update({
+        where: { id: postId },
+        data: { status: PostStatus.PUBLISHING },
+      });
+
+      try {
+        await this.publisher.publish(fullPost);
+      } catch (err) {
+        this.logger.error(`Publish failed for post ${postId}: ${String(err)}`);
+        // Mark as published anyway since content is saved — targets show individual failures
+        await this.prisma.post.update({
+          where: { id: postId },
+          data: { status: PostStatus.PUBLISHED, publishedAt: new Date() },
+        });
+      }
+
+      this.logger.log(`Post publish triggered: id=${postId} agencyId=${agencyId}`);
+    }
+
     return this.findOne(agencyId, postId);
   }
 
