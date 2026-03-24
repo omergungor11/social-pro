@@ -1761,10 +1761,24 @@ export default function PostDetailPage(): React.JSX.Element {
           sourceContent={crossPostSource.content}
           sourcePlatform={crossPostSource.platform}
           existingPlatforms={post.platforms}
-          onConfirm={(_targets, _newContents) => {
-            // Cross-posting targets are sent as a new post via the API
-            // or handled by expanding the existing post's platforms
-            showToast('Content adapted for cross-posting', 'success');
+          onConfirm={async (targets, newContents) => {
+            try {
+              // Create a new post per target platform with adapted content
+              for (const platform of targets) {
+                const adaptedContent = newContents[platform] ?? crossPostSource.content;
+                await apiClient.post('/posts', {
+                  title: `${post.title} (${getPlatformLabel(platform)})`,
+                  content: { text: adaptedContent },
+                  clientId: post.clientId || undefined,
+                });
+              }
+              showToast(`Cross-posted to ${targets.length} platform${targets.length > 1 ? 's' : ''}`, 'success');
+              // Refresh post data
+              void fetchPost();
+            } catch (err) {
+              console.error('Cross-post failed:', err);
+              showToast('Failed to cross-post. Please try again.', 'error');
+            }
           }}
         />
       )}
