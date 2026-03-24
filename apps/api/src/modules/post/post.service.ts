@@ -37,8 +37,14 @@ export type PostFull = Post & {
   approvals: PostApproval[];
 };
 
+type PostTargetListItem = Pick<PostTarget, "id" | "platform" | "status" | "publishedAt"> & {
+  socialAccount: Pick<SocialAccount, "platform" | "displayName"> | null;
+};
+
 type PostListItem = Post & {
   _count: { targets: number; media: number };
+  targets: PostTargetListItem[];
+  client: { id: string; name: string } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -95,7 +101,13 @@ export class PostService {
     const [posts, total] = await this.prisma.$transaction([
       this.prisma.post.findMany({
         where,
-        include: { _count: { select: { targets: true, media: true } } },
+        include: {
+          _count: { select: { targets: true, media: true } },
+          targets: {
+            select: { id: true, platform: true, status: true, publishedAt: true, socialAccount: { select: { platform: true, displayName: true } } },
+          },
+          client: { select: { id: true, name: true } },
+        },
         orderBy: [{ scheduledAt: "desc" }, { createdAt: "desc" }],
         skip,
         take: limit,

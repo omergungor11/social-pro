@@ -677,22 +677,40 @@ export default function PostsPage(): React.JSX.Element {
 
                       return (
                         <TableRow key={post.id} className={cn(isDuplicating && 'opacity-50')}>
-                          {/* Post — title + content preview + edit icon */}
+                          {/* Post — title + content preview + hover tooltip + edit icon */}
                           <TableCell>
-                            <div className="flex items-start gap-2 max-w-[340px]">
-                              <Link
-                                href={`/dashboard/posts/${post.id}`}
-                                className="flex-1 min-w-0 group"
-                              >
-                                <p className="truncate text-sm font-medium text-slate-900 group-hover:text-blue-600 transition-colors">
-                                  {post.title}
-                                </p>
-                                {post.content && (
-                                  <p className="mt-0.5 text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                                    {post.content.length > 120 ? post.content.slice(0, 120) + '...' : post.content}
+                            <div className="flex items-start gap-2 max-w-[380px]">
+                              <div className="flex-1 min-w-0 relative group/preview">
+                                <Link
+                                  href={`/dashboard/posts/${post.id}`}
+                                  className="block group/link"
+                                >
+                                  <p className="truncate text-sm font-medium text-slate-900 group-hover/link:text-blue-600 transition-colors">
+                                    {post.title}
                                   </p>
+                                  {post.content && (
+                                    <p className="mt-0.5 text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                                      {post.content.length > 120 ? post.content.slice(0, 120) + '...' : post.content}
+                                    </p>
+                                  )}
+                                </Link>
+                                {/* Hover preview tooltip */}
+                                {post.content && post.content.length > 60 && (
+                                  <div className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden w-80 rounded-xl border border-slate-200 bg-white p-4 shadow-xl shadow-slate-900/10 group-hover/preview:block">
+                                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Preview</p>
+                                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap line-clamp-6">
+                                      {post.content}
+                                    </p>
+                                    {post.platforms.length > 0 && (
+                                      <div className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-2">
+                                        {[...new Set(post.platforms)].map((p) => (
+                                          <PlatformIcon key={p} platform={p} size="sm" />
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
-                              </Link>
+                              </div>
                               <Link
                                 href={`/dashboard/posts/${post.id}`}
                                 className="mt-0.5 shrink-0 rounded-md p-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
@@ -706,18 +724,15 @@ export default function PostsPage(): React.JSX.Element {
                           {/* Platforms */}
                           <TableCell className="hidden sm:table-cell">
                             {post.platforms.length > 0 ? (
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {post.platforms.slice(0, 4).map((p) => (
-                                  <PlatformIcon key={p} platform={p} size="sm" />
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {[...new Set(post.platforms)].map((p) => (
+                                  <div key={p} className="flex items-center gap-1 rounded-md bg-slate-50 px-1.5 py-0.5 border border-slate-100">
+                                    <PlatformIcon platform={p} size="sm" />
+                                  </div>
                                 ))}
-                                {post.platforms.length > 4 && (
-                                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
-                                    +{post.platforms.length - 4}
-                                  </span>
-                                )}
                               </div>
                             ) : (
-                              <span className="text-slate-300 text-xs">—</span>
+                              <span className="text-slate-300 text-xs italic">No platform</span>
                             )}
                           </TableCell>
 
