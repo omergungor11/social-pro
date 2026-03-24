@@ -152,8 +152,10 @@ export function ConnectDialog({
     }
   }
 
-  // Derived: which platforms are available
+  // Derived: which platforms are available (skip check in dev mode)
+  const isDev = process.env.NODE_ENV === 'development';
   const noPlatformsConfigured =
+    !isDev &&
     !loading &&
     availError === null &&
     availability.size > 0 &&
@@ -163,6 +165,8 @@ export function ConnectDialog({
     });
 
   function isPlatformAvailable(platform: Platform): boolean {
+    // In development mode, all platforms are available for testing
+    if (process.env.NODE_ENV === 'development') return true;
     // While loading or on error we allow interaction (optimistic)
     if (loading || availError !== null || availability.size === 0) return true;
     const avail = availability.get(platform);
