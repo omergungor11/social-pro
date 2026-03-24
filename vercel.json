@@ -1,0 +1,8 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm turbo build --filter=web",
+  "installCommand": "pnpm install",
+  "outputDirectory": "apps/web/.next",
+  "rootDirectory": "apps/web",
+  "nodeVersion": "22.x"
+}
