@@ -404,10 +404,10 @@ export default function PostsPage(): React.JSX.Element {
         items = response as ApiPostRaw[];
         setTotalCount(items.length);
       } else {
-        const paginated = response as Record<string, unknown>;
-        const rawItems = (paginated.data ?? paginated.items ?? []) as ApiPostRaw[];
+        const paginated = response as unknown as Record<string, unknown>;
+        const rawItems = ((paginated['data'] ?? paginated['items'] ?? []) as unknown) as ApiPostRaw[];
         items = rawItems;
-        const meta = paginated.meta as { total?: number } | undefined;
+        const meta = paginated['meta'] as { total?: number } | undefined;
         setTotalCount(meta?.total ?? rawItems.length);
       }
       setPosts(items.map(mapApiPost));

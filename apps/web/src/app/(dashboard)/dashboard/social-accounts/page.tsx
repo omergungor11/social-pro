@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Share2, BarChart3, TrendingUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -197,7 +198,7 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
 // Page
 // ---------------------------------------------------------------------------
 
-export default function SocialAccountsPage(): React.JSX.Element {
+function SocialAccountsContent(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [accounts, setAccounts] = React.useState<SocialAccount[]>([]);
@@ -332,5 +333,13 @@ export default function SocialAccountsPage(): React.JSX.Element {
 
       <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
     </>
+  );
+}
+
+export default function SocialAccountsPage(): React.JSX.Element {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-500" /></div>}>
+      <SocialAccountsContent />
+    </Suspense>
   );
 }

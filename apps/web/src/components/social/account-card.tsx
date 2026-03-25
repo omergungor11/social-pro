@@ -117,7 +117,7 @@ function Sparkline({ data, className }: { data: number[]; className?: string }):
     })
     .join(' ');
 
-  const trend = data[data.length - 1] >= data[0];
+  const trend = (data[data.length - 1] ?? 0) >= (data[0] ?? 0);
 
   return (
     <svg width={w} height={h} className={cn('overflow-visible', className)} aria-hidden="true">
