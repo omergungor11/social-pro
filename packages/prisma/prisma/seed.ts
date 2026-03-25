@@ -58,27 +58,48 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
   // 1. Resolve existing admin user and agency
   // -------------------------------------------------------------------------
-  console.log("Looking up admin user and agency...");
+  console.log("Looking up or creating admin user and agency...");
 
-  const adminUser = await prisma.user.findUnique({
+  let adminUser = await prisma.user.findUnique({
     where: { email: "admin@socialpro.dev" },
   });
 
   if (!adminUser) {
-    throw new Error(
-      "Admin user (admin@socialpro.dev) not found. Run the initial migration/seed first."
-    );
+    console.log("  Admin user not found — creating...");
+    const bcrypt = await import("bcrypt");
+    const passwordHash = await bcrypt.hash("159753*a", 12);
+
+    adminUser = await prisma.user.create({
+      data: {
+        email: "admin@socialpro.dev",
+        name: "Admin",
+        passwordHash,
+      },
+    });
+    console.log(`  Created admin user: ${adminUser.id}`);
   }
 
-  const adminMembership = await prisma.agencyMember.findFirst({
+  let adminMembership = await prisma.agencyMember.findFirst({
     where: { userId: adminUser.id },
     include: { agency: true },
   });
 
   if (!adminMembership) {
-    throw new Error(
-      "Admin user has no agency membership. Ensure the agency is seeded."
-    );
+    console.log("  Agency not found — creating...");
+    const agency = await prisma.agency.create({
+      data: { name: "Social Pro Agency", slug: "social-pro-agency" },
+    });
+
+    adminMembership = await prisma.agencyMember.create({
+      data: {
+        userId: adminUser.id,
+        agencyId: agency.id,
+        role: "OWNER",
+        acceptedAt: new Date(),
+      },
+      include: { agency: true },
+    });
+    console.log(`  Created agency: ${agency.name} (${agency.id})`);
   }
 
   const agency = adminMembership.agency;
