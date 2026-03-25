@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 // Dev mode auto-login
 // ---------------------------------------------------------------------------
 
-const DEV_MODE = process.env.NODE_ENV === "development";
+const DEV_MODE = process.env.NODE_ENV === "development" || process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 const DEV_EMAIL = "admin@socialpro.dev";
 const DEV_PASSWORD = "159753*a";
 
