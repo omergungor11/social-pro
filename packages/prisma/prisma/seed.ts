@@ -53,7 +53,7 @@ const PLACEHOLDER_TOKEN = "encrypted_placeholder_token_aes256gcm";
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log("Starting seed...\n");
+  console.log("Starting seed... (v2)\n");
 
   // -------------------------------------------------------------------------
   // 1. Resolve existing admin user and agency
