@@ -144,7 +144,7 @@ export class SocialAccountController {
     @Query("error") error?: string,
   ): Promise<{ url: string }> {
     const frontendUrl =
-      process.env["FRONTEND_URL"] ?? "http://localhost:3000";
+      process.env["FRONTEND_URL"] || process.env["CORS_ORIGIN"] || "http://localhost:3000";
 
     if (error) {
       return {
