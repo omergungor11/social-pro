@@ -425,7 +425,7 @@ export default function AccountDetailPage(): React.JSX.Element {
 
   const fetchProfile = useCallback(async (): Promise<void> => {
     try {
-      const accounts = await apiClient.get<ApiAccount[]>('/api/v1/social-accounts');
+      const accounts = await apiClient.get<ApiAccount[]>('/social-accounts');
       const account = accounts.find((a) => a.id === accountId);
       if (!account) {
         setNotFound(true);
@@ -445,7 +445,7 @@ export default function AccountDetailPage(): React.JSX.Element {
   const fetchPosts = useCallback(async (): Promise<void> => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await apiClient.get<any>(`/api/v1/posts?socialAccountId=${accountId}&limit=50`);
+      const response = await apiClient.get<any>(`/posts?socialAccountId=${accountId}&limit=50`);
       // Handle both paginated {data: [], meta: {}} and raw array responses
       // Note: apiClient.get already unwraps the outer {data} envelope,
       // so response is either PostItem[] or {data: PostItem[], meta: ...}
