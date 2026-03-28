@@ -464,21 +464,54 @@ export class SocialAccountService {
 
     try {
       if (platform === SocialPlatform.INSTAGRAM) {
-        const url =
-          `https://graph.facebook.com/v22.0/${account.platformUserId}/media` +
+        // Instagram media endpoint requires the IG Business Account ID
+        // First try directly with platformUserId, then fallback via /me/accounts
+        let igUserId = account.platformUserId;
+
+        // Try fetching media with stored platformUserId
+        let url =
+          `https://graph.facebook.com/v22.0/${igUserId}/media` +
           `?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,like_count,comments_count` +
           `&limit=25&access_token=${accessToken}`;
-        const response = await fetch(url);
+        let response = await fetch(url);
+
+        // If that fails, try to resolve IG Business Account ID from /me/accounts
+        if (!response.ok) {
+          this.logger.log(`Direct IG media fetch failed (${response.status}), trying /me/accounts...`);
+          const meUrl = `https://graph.facebook.com/v22.0/me/accounts?fields=instagram_business_account{id}&access_token=${accessToken}`;
+          const meResp = await fetch(meUrl);
+          if (meResp.ok) {
+            const meData = (await meResp.json()) as { data?: Array<{ instagram_business_account?: { id: string } }> };
+            const igBizId = meData.data?.find(p => p.instagram_business_account)?.instagram_business_account?.id;
+            if (igBizId && igBizId !== igUserId) {
+              this.logger.log(`Found IG Business Account ID: ${igBizId} (was: ${igUserId})`);
+              igUserId = igBizId;
+              // Update stored platformUserId for future calls
+              await this.prisma.socialAccount.update({
+                where: { id: accountId },
+                data: { platformUserId: igBizId },
+              });
+              // Retry with correct ID
+              url =
+                `https://graph.facebook.com/v22.0/${igBizId}/media` +
+                `?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,like_count,comments_count` +
+                `&limit=25&access_token=${accessToken}`;
+              response = await fetch(url);
+            }
+          }
+        }
+
         if (response.ok) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const data = (await response.json()) as { data?: any[] };
           posts = data.data ?? [];
+          this.logger.log(`Instagram API returned ${posts.length} media items for account ${accountId}`);
         } else {
           const text = await response.text();
           this.logger.warn(
             `Instagram media fetch failed for account ${accountId}: ${response.status} ${text}`,
           );
-          return { synced: 0, message: `Instagram API returned ${response.status}` };
+          return { synced: 0, message: `Instagram API error: ${response.status}` };
         }
       } else if (platform === SocialPlatform.FACEBOOK) {
         const url =
