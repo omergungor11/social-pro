@@ -173,6 +173,22 @@ export class SocialAccountController {
   }
 
   // ---------------------------------------------------------------------------
+  // Get single account profile
+  // ---------------------------------------------------------------------------
+
+  @Get(":id")
+  @ApiOperation({ summary: "Get social account profile details" })
+  @ApiParam({ name: "id", description: "Social account ID" })
+  @ApiResponse({ status: 200, description: "Account retrieved" })
+  @ApiResponse({ status: 404, description: "Account not found" })
+  async findOne(
+    @CurrentAgency() agencyId: string,
+    @Param("id") accountId: string,
+  ): Promise<SocialAccountPublic> {
+    return this.socialAccountService.findOne(agencyId, accountId);
+  }
+
+  // ---------------------------------------------------------------------------
   // Disconnect
   // ---------------------------------------------------------------------------
 

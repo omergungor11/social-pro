@@ -220,6 +220,24 @@ export class SocialAccountService {
   }
 
   // ---------------------------------------------------------------------------
+  // Find one
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns a single social account by ID, scoped to the agency.
+   * Access tokens are stripped from the result.
+   */
+  async findOne(agencyId: string, accountId: string): Promise<SocialAccountPublic> {
+    const account = await this.prisma.socialAccount.findFirst({
+      where: { id: accountId, agencyId },
+    });
+    if (!account) {
+      throw new NotFoundException(`Social account '${accountId}' not found`);
+    }
+    return this.stripTokens(account);
+  }
+
+  // ---------------------------------------------------------------------------
   // Disconnect
   // ---------------------------------------------------------------------------
 

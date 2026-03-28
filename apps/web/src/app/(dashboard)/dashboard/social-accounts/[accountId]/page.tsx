@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Grid3X3, List, Heart, MessageCircle, Eye, Share2,
   Users, FileText, TrendingUp, TrendingDown, Calendar, ExternalLink,
-  BarChart3, Bookmark, Play,
+  BarChart3, Bookmark, Play, Loader2, AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PlatformIcon, getPlatformLabel } from '@/components/social/platform-icon';
 import type { Platform } from '@/components/social/platform-icon';
+import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,8 +26,8 @@ interface AccountProfile {
   username: string;
   displayName: string;
   bio: string;
-  avatarUrl: string;
-  coverUrl?: string;
+  avatarUrl: string | null;
+  coverUrl?: string | null;
   website?: string;
   isVerified: boolean;
   status: 'active' | 'expiring' | 'disconnected';
@@ -49,8 +50,8 @@ interface AccountProfile {
 
 interface PostItem {
   id: string;
-  thumbnail: string;
-  type: 'image' | 'video' | 'carousel';
+  thumbnail: string | null;
+  type: 'image' | 'video' | 'carousel' | 'post';
   caption: string;
   publishedAt: string;
   likes: number;
@@ -58,92 +59,90 @@ interface PostItem {
   impressions: number;
   saves: number;
   shares: number;
-  status: 'published' | 'scheduled' | 'failed';
+  status: string;
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API response shapes (loose — we use ?? everywhere)
 // ---------------------------------------------------------------------------
 
-const MOCK_PROFILES: Record<string, AccountProfile> = {
-  sa1: {
-    id: 'sa1', platform: 'twitter', username: 'acmecorp', displayName: 'Acme Corporation',
-    bio: 'Building the future, one innovation at a time. 🚀 | Official account of Acme Corp | B2B SaaS',
-    avatarUrl: '', coverUrl: '', website: 'https://acmecorp.com', isVerified: true,
-    status: 'active', connectedAt: '2024-01-20',
-    stats: { followers: 45200, following: 1240, posts: 342, engagementRate: 4.8 },
-    monthlyMetrics: [
-      { month: 'Oct', followers: 38900, impressions: 720000, likes: 14200, comments: 2400, reach: 456000 },
-      { month: 'Nov', followers: 40100, impressions: 780000, likes: 15100, comments: 2600, reach: 489000 },
-      { month: 'Dec', followers: 41800, impressions: 810000, likes: 16200, comments: 2800, reach: 512000 },
-      { month: 'Jan', followers: 42500, impressions: 835000, likes: 16800, comments: 2900, reach: 534000 },
-      { month: 'Feb', followers: 43900, impressions: 860000, likes: 17600, comments: 3050, reach: 558000 },
-      { month: 'Mar', followers: 45200, impressions: 892000, likes: 18400, comments: 3200, reach: 578000 },
-    ],
-  },
-  sa2: {
-    id: 'sa2', platform: 'instagram', username: 'acmecorp.official', displayName: 'Acme Corp Official',
-    bio: '✨ Premium lifestyle & innovation\n📍 San Francisco, CA\n🔗 linktr.ee/acmecorp\n#AcmeLife #Innovation',
-    avatarUrl: '', coverUrl: '', website: 'https://linktr.ee/acmecorp', isVerified: true,
-    status: 'active', connectedAt: '2024-01-20',
-    stats: { followers: 128500, following: 890, posts: 567, engagementRate: 6.2 },
-    monthlyMetrics: [
-      { month: 'Oct', followers: 112000, impressions: 1890000, likes: 38200, comments: 6800, reach: 1230000 },
-      { month: 'Nov', followers: 116400, impressions: 1980000, likes: 39800, comments: 7200, reach: 1290000 },
-      { month: 'Dec', followers: 119800, impressions: 2100000, likes: 41200, comments: 7800, reach: 1380000 },
-      { month: 'Jan', followers: 122400, impressions: 2180000, likes: 42800, comments: 8100, reach: 1420000 },
-      { month: 'Feb', followers: 125200, impressions: 2260000, likes: 44100, comments: 8500, reach: 1480000 },
-      { month: 'Mar', followers: 128500, impressions: 2340000, likes: 45600, comments: 8900, reach: 1540000 },
-    ],
-  },
-  sa3: {
-    id: 'sa3', platform: 'facebook', username: 'BrightIdeasStudio', displayName: 'Bright Ideas Studio',
-    bio: 'Design studio crafting beautiful digital experiences. Branding • UI/UX • Web Development',
-    avatarUrl: '', website: 'https://brightideas.studio', isVerified: false,
-    status: 'expiring', connectedAt: '2024-02-10',
-    stats: { followers: 23400, following: 456, posts: 189, engagementRate: 2.9 },
-    monthlyMetrics: [
-      { month: 'Oct', followers: 24100, impressions: 520000, likes: 6200, comments: 1400, reach: 340000 },
-      { month: 'Nov', followers: 24000, impressions: 498000, likes: 5900, comments: 1350, reach: 325000 },
-      { month: 'Dec', followers: 23800, impressions: 480000, likes: 5700, comments: 1300, reach: 310000 },
-      { month: 'Jan', followers: 23700, impressions: 470000, likes: 5800, comments: 1250, reach: 305000 },
-      { month: 'Feb', followers: 23550, impressions: 462000, likes: 5650, comments: 1220, reach: 298000 },
-      { month: 'Mar', followers: 23400, impressions: 456000, likes: 5600, comments: 1200, reach: 290000 },
-    ],
-  },
-};
+interface ApiAccount {
+  id: string;
+  platform?: string;
+  platformUsername?: string;
+  displayName?: string;
+  avatarUrl?: string | null;
+  isActive?: boolean;
+  tokenExpiresAt?: string | null;
+  connectedAt?: string;
+  metadata?: Record<string, unknown> | null;
+}
 
-// Generate mock posts
-function generatePosts(platform: Platform): PostItem[] {
-  const captions = [
-    'New product launch! Excited to share what we\'ve been working on 🚀',
-    'Behind the scenes at our latest photoshoot 📸',
-    'Meet the team that makes it all happen 💪',
-    'Customer spotlight: How @client achieved 3x growth',
-    'Tips for maximizing your social media reach',
-    'Weekend vibes at the office ☕',
-    'Announcing our partnership with @brand',
-    'Your Monday motivation starts here ✨',
-    'Throwback to our best campaign of the year',
-    'Breaking: Industry trends you need to know',
-    'New blog post: 5 strategies for 2026',
-    'Thank you for 100K followers! 🎉',
-  ];
-  const colors = ['#f43f5e', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#6366f1', '#14b8a6', '#ef4444', '#a855f7', '#0ea5e9', '#84cc16'];
+// ---------------------------------------------------------------------------
+// Mapper functions
+// ---------------------------------------------------------------------------
 
-  return captions.map((caption, i) => ({
-    id: `post-${i + 1}`,
-    thumbnail: `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="${colors[i]}"/><text x="200" y="200" text-anchor="middle" dy=".35em" fill="white" font-size="48" font-family="sans-serif">${i + 1}</text></svg>`)}`,
-    type: i % 5 === 0 ? 'video' : i % 7 === 0 ? 'carousel' : 'image' as PostItem['type'],
-    caption,
-    publishedAt: new Date(2026, 2, 20 - i).toISOString(),
-    likes: Math.floor(Math.random() * 2000) + 100,
-    comments: Math.floor(Math.random() * 300) + 10,
-    impressions: Math.floor(Math.random() * 50000) + 5000,
-    saves: Math.floor(Math.random() * 500) + 20,
-    shares: Math.floor(Math.random() * 200) + 5,
-    status: i < 10 ? 'published' : i === 10 ? 'scheduled' : 'failed',
-  }));
+function mapApiToProfile(a: ApiAccount): AccountProfile {
+  const meta = (a.metadata ?? {}) as Record<string, unknown>;
+
+  let status: AccountProfile['status'] = 'active';
+  if (!a.isActive) {
+    status = 'disconnected';
+  } else if (
+    a.tokenExpiresAt != null &&
+    new Date(a.tokenExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000
+  ) {
+    status = 'expiring';
+  }
+
+  return {
+    id: a.id,
+    platform: ((a.platform ?? '').toLowerCase()) as Platform,
+    username: (a.platformUsername ?? a.displayName ?? 'Unknown') as string,
+    displayName: (a.displayName ?? a.platformUsername ?? 'Unknown') as string,
+    bio: ((meta.bio as string | undefined) ?? '') as string,
+    avatarUrl: a.avatarUrl ?? null,
+    coverUrl: null,
+    website: ((meta.website as string | undefined) ?? '') as string,
+    isVerified: ((meta.isVerified as boolean | undefined) ?? false) as boolean,
+    status,
+    connectedAt: a.connectedAt ?? '',
+    stats: {
+      followers: ((meta.followersCount as number | undefined) ?? 0) as number,
+      following: ((meta.followingCount as number | undefined) ?? 0) as number,
+      posts: ((meta.postsCount as number | undefined) ?? 0) as number,
+      engagementRate: ((meta.engagementRate as number | undefined) ?? 0) as number,
+    },
+    monthlyMetrics: [],
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapApiToPost(p: any): PostItem {
+  const content =
+    typeof p.content === 'object' && p.content !== null
+      ? ((p.content?.text ?? '') as string)
+      : ((p.content ?? '') as string);
+
+  const rawStatus = ((p.status ?? 'DRAFT') as string).toLowerCase();
+  const status =
+    rawStatus === 'published' || rawStatus === 'scheduled' || rawStatus === 'failed'
+      ? rawStatus
+      : rawStatus;
+
+  return {
+    id: p.id as string,
+    thumbnail: null,
+    type: 'post' as const,
+    caption: content,
+    publishedAt: (p.publishedAt ?? p.createdAt ?? '') as string,
+    likes: 0,
+    comments: 0,
+    impressions: 0,
+    saves: 0,
+    shares: 0,
+    status,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -200,8 +199,12 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
         {/* Avatar row */}
         <div className="flex flex-col sm:flex-row sm:items-end gap-4 -mt-10 sm:-mt-12">
           <div className="relative">
-            <div className="h-20 w-20 sm:h-28 sm:w-28 rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-2xl sm:text-4xl font-bold shadow-lg">
-              {initial}
+            <div className="h-20 w-20 sm:h-28 sm:w-28 rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-2xl sm:text-4xl font-bold shadow-lg overflow-hidden">
+              {profile.avatarUrl ? (
+                <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
+              ) : (
+                initial
+              )}
             </div>
             <div className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2">
               <PlatformIcon platform={profile.platform} size="sm" />
@@ -235,7 +238,9 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
         </div>
 
         {/* Bio */}
-        <p className="mt-3 text-sm text-slate-600 whitespace-pre-line max-w-lg">{profile.bio}</p>
+        {profile.bio && (
+          <p className="mt-3 text-sm text-slate-600 whitespace-pre-line max-w-lg">{profile.bio}</p>
+        )}
 
         {/* Stats row (Instagram-style) */}
         <div className="mt-5 flex items-center gap-6 sm:gap-10 border-t border-slate-100 pt-4">
@@ -328,53 +333,70 @@ function MonthlyAnalytics({ metrics }: { metrics: AccountProfile['monthlyMetrics
 // Post grid (Instagram-style)
 // ---------------------------------------------------------------------------
 
+const PLACEHOLDER_COLORS = [
+  '#f43f5e', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b',
+  '#ec4899', '#6366f1', '#14b8a6', '#ef4444', '#a855f7',
+  '#0ea5e9', '#84cc16',
+];
+
+function getPlaceholderThumbnail(index: number, label: string): string {
+  const color = PLACEHOLDER_COLORS[index % PLACEHOLDER_COLORS.length] ?? '#64748b';
+  const text = label.charAt(0).toUpperCase();
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="${color}"/><text x="200" y="200" text-anchor="middle" dy=".35em" fill="white" font-size="96" font-family="sans-serif">${text}</text></svg>`
+  )}`;
+}
+
 function PostGrid({ posts, accountId }: { posts: PostItem[]; accountId: string }): React.JSX.Element {
   return (
     <div className="grid grid-cols-3 gap-1 sm:gap-2">
-      {posts.map((post) => (
-        <Link
-          key={post.id}
-          href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
-          className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100"
-        >
-          {/* Thumbnail */}
-          <img src={post.thumbnail} alt="" className="h-full w-full object-cover" />
+      {posts.map((post, i) => {
+        const thumb = post.thumbnail ?? getPlaceholderThumbnail(i, post.caption || String(i + 1));
+        return (
+          <Link
+            key={post.id}
+            href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
+            className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100"
+          >
+            {/* Thumbnail */}
+            <img src={thumb} alt="" className="h-full w-full object-cover" />
 
-          {/* Type badge */}
-          {post.type === 'video' && (
-            <div className="absolute top-2 right-2">
-              <Play className="h-4 w-4 text-white drop-shadow-lg" fill="white" />
-            </div>
-          )}
-          {post.type === 'carousel' && (
-            <div className="absolute top-2 right-2">
-              <svg className="h-4 w-4 text-white drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="2" y="2" width="15" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
-                <rect x="7" y="7" width="15" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
-              </svg>
-            </div>
-          )}
+            {/* Type badge */}
+            {post.type === 'video' && (
+              <div className="absolute top-2 right-2">
+                <Play className="h-4 w-4 text-white drop-shadow-lg" fill="white" />
+              </div>
+            )}
+            {post.type === 'carousel' && (
+              <div className="absolute top-2 right-2">
+                <svg className="h-4 w-4 text-white drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="2" y="2" width="15" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <rect x="7" y="7" width="15" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </div>
+            )}
 
-          {/* Status indicator for non-published */}
-          {post.status !== 'published' && (
-            <div className="absolute top-2 left-2">
-              <Badge variant={post.status === 'scheduled' ? 'blue' : 'red'} className="text-[9px] px-1.5 py-0.5">
-                {post.status === 'scheduled' ? 'Scheduled' : 'Failed'}
-              </Badge>
-            </div>
-          )}
+            {/* Status indicator for non-published */}
+            {post.status !== 'published' && (
+              <div className="absolute top-2 left-2">
+                <Badge variant={post.status === 'scheduled' ? 'blue' : 'red'} className="text-[9px] px-1.5 py-0.5">
+                  {post.status === 'scheduled' ? 'Scheduled' : 'Failed'}
+                </Badge>
+              </div>
+            )}
 
-          {/* Hover overlay */}
-          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 text-white">
-            <span className="flex items-center gap-1 text-sm font-semibold">
-              <Heart className="h-4 w-4" fill="white" /> {fmt(post.likes)}
-            </span>
-            <span className="flex items-center gap-1 text-sm font-semibold">
-              <MessageCircle className="h-4 w-4" fill="white" /> {fmt(post.comments)}
-            </span>
-          </div>
-        </Link>
-      ))}
+            {/* Hover overlay */}
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 text-white">
+              <span className="flex items-center gap-1 text-sm font-semibold">
+                <Heart className="h-4 w-4" fill="white" /> {fmt(post.likes)}
+              </span>
+              <span className="flex items-center gap-1 text-sm font-semibold">
+                <MessageCircle className="h-4 w-4" fill="white" /> {fmt(post.comments)}
+              </span>
+            </div>
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -387,24 +409,131 @@ export default function AccountDetailPage(): React.JSX.Element {
   const params = useParams();
   const router = useRouter();
   const accountId = params.accountId as string;
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [postFilter, setPostFilter] = useState<'all' | 'published' | 'scheduled'>('all');
 
-  const profile = MOCK_PROFILES[accountId];
-  const allPosts = useMemo(() => generatePosts(profile?.platform ?? 'instagram'), [profile?.platform]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [notFound, setNotFound] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [profile, setProfile] = useState<AccountProfile | null>(null);
+  const [posts, setPosts] = useState<PostItem[]>([]);
+
+  // ---------------------------------------------------------------------------
+  // Fetch account profile
+  // ---------------------------------------------------------------------------
+
+  const fetchProfile = useCallback(async (): Promise<void> => {
+    try {
+      const accounts = await apiClient.get<ApiAccount[]>('/api/v1/social-accounts');
+      const account = accounts.find((a) => a.id === accountId);
+      if (!account) {
+        setNotFound(true);
+        return;
+      }
+      setProfile(mapApiToProfile(account));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load account';
+      setError(message);
+    }
+  }, [accountId]);
+
+  // ---------------------------------------------------------------------------
+  // Fetch posts for this account
+  // ---------------------------------------------------------------------------
+
+  const fetchPosts = useCallback(async (): Promise<void> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await apiClient.get<any>(`/api/v1/posts?socialAccountId=${accountId}&limit=50`);
+      // Handle both paginated {data: [], meta: {}} and raw array responses
+      // Note: apiClient.get already unwraps the outer {data} envelope,
+      // so response is either PostItem[] or {data: PostItem[], meta: ...}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rawPosts: any[] = Array.isArray(response)
+        ? response
+        : Array.isArray((response as any)?.data)
+          ? (response as any).data
+          : [];
+      setPosts(rawPosts.map(mapApiToPost));
+    } catch {
+      // Posts are non-fatal — page still usable without them
+      setPosts([]);
+    }
+  }, [accountId]);
+
+  // ---------------------------------------------------------------------------
+  // Initial load
+  // ---------------------------------------------------------------------------
+
+  const loadAll = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    setNotFound(false);
+    await Promise.all([fetchProfile(), fetchPosts()]);
+    setLoading(false);
+  }, [fetchProfile, fetchPosts]);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  // ---------------------------------------------------------------------------
+  // Filtered posts
+  // ---------------------------------------------------------------------------
 
   const filteredPosts = useMemo(() => {
-    if (postFilter === 'all') return allPosts;
-    return allPosts.filter((p) => p.status === postFilter);
-  }, [allPosts, postFilter]);
+    if (postFilter === 'all') return posts;
+    return posts.filter((p) => p.status === postFilter);
+  }, [posts, postFilter]);
+
+  // ---------------------------------------------------------------------------
+  // Render states
+  // ---------------------------------------------------------------------------
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <p className="text-slate-500 text-lg">Account not found</p>
+        <Link href="/dashboard/social-accounts">
+          <Button variant="outline">
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to accounts
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <AlertCircle className="h-8 w-8 text-red-500" />
+        <p className="text-slate-700 font-medium">Something went wrong</p>
+        <p className="text-sm text-slate-500">{error}</p>
+        <Button variant="outline" onClick={() => void loadAll()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   if (!profile) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <p className="text-slate-500">Account not found</p>
-        <Button variant="outline" className="mt-4" onClick={() => router.push('/dashboard/social-accounts')}>
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back to accounts
-        </Button>
+        <p className="text-slate-500">No profile data available</p>
+        <Link href="/dashboard/social-accounts">
+          <Button variant="outline" className="mt-4">
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to accounts
+          </Button>
+        </Link>
       </div>
     );
   }
@@ -422,8 +551,10 @@ export default function AccountDetailPage(): React.JSX.Element {
       {/* Profile header */}
       <ProfileHeader profile={profile} />
 
-      {/* Monthly analytics */}
-      <MonthlyAnalytics metrics={profile.monthlyMetrics} />
+      {/* Monthly analytics — only rendered when metrics are available */}
+      {profile.monthlyMetrics.length >= 2 && (
+        <MonthlyAnalytics metrics={profile.monthlyMetrics} />
+      )}
 
       {/* Posts section */}
       <Card>
@@ -473,27 +604,34 @@ export default function AccountDetailPage(): React.JSX.Element {
             <PostGrid posts={filteredPosts} accountId={accountId} />
           ) : (
             <div className="space-y-2">
-              {filteredPosts.map((post) => (
-                <Link
-                  key={post.id}
-                  href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
-                  className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
-                >
-                  <img src={post.thumbnail} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{post.caption}</p>
-                    <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(post.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                    <span className="flex items-center gap-1"><Heart className="h-3 w-3 text-red-400" /> {fmt(post.likes)}</span>
-                    <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-amber-500" /> {fmt(post.comments)}</span>
-                    <span className="flex items-center gap-1"><Eye className="h-3 w-3 text-blue-500" /> {fmt(post.impressions)}</span>
-                  </div>
-                </Link>
-              ))}
+              {filteredPosts.map((post, i) => {
+                const thumb = post.thumbnail ?? getPlaceholderThumbnail(i, post.caption || String(i + 1));
+                return (
+                  <Link
+                    key={post.id}
+                    href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
+                  >
+                    <img src={thumb} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">
+                        {post.caption || <span className="text-slate-400 italic">No caption</span>}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {post.publishedAt
+                          ? new Date(post.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          : '—'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+                      <span className="flex items-center gap-1"><Heart className="h-3 w-3 text-red-400" /> {fmt(post.likes)}</span>
+                      <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-amber-500" /> {fmt(post.comments)}</span>
+                      <span className="flex items-center gap-1"><Eye className="h-3 w-3 text-blue-500" /> {fmt(post.impressions)}</span>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </CardContent>

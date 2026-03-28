@@ -25,6 +25,11 @@ export class PostListQueryDto extends PaginationQueryDto {
   @IsString()
   clientId?: string;
 
+  @ApiPropertyOptional({ description: "Filter by social account ID (target)" })
+  @IsOptional()
+  @IsString()
+  socialAccountId?: string;
+
   @ApiPropertyOptional({
     description: "Start of date range filter (ISO-8601, inclusive)",
     example: "2025-01-01T00:00:00Z",

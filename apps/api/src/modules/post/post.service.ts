@@ -74,7 +74,7 @@ export class PostService {
     agencyId: string,
     query: PostListQueryDto
   ): Promise<PaginatedResponseDto<PostListItem>> {
-    const { page, limit, status, platform, clientId, startDate, endDate } = query;
+    const { page, limit, status, platform, clientId, startDate, endDate, socialAccountId } = query;
     const skip = (page - 1) * limit;
 
     const where = {
@@ -95,6 +95,9 @@ export class PostService {
               some: { socialAccount: { platform } },
             },
           }
+        : {}),
+      ...(socialAccountId != null
+        ? { targets: { some: { socialAccountId } } }
         : {}),
     };
 
