@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Grid3X3, List, Heart, MessageCircle, Eye, Share2,
   Users, FileText, TrendingUp, TrendingDown, Calendar, ExternalLink,
-  BarChart3, Bookmark, Play, Loader2, AlertCircle,
+  BarChart3, Bookmark, Play, Loader2, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -418,6 +418,8 @@ export default function AccountDetailPage(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [posts, setPosts] = useState<PostItem[]>([]);
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // Fetch account profile
@@ -442,19 +444,30 @@ export default function AccountDetailPage(): React.JSX.Element {
   // Fetch posts for this account
   // ---------------------------------------------------------------------------
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function parsePostResponse(response: any): any[] {
+    if (Array.isArray(response)) return response;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (response?.data && Array.isArray((response as any).data)) return (response as any).data;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (response?.items && Array.isArray((response as any).items)) return (response as any).items;
+    return [];
+  }
+
   const fetchPosts = useCallback(async (): Promise<void> => {
     try {
+      // First: fetch posts targeted to this specific social account
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await apiClient.get<any>(`/posts?socialAccountId=${accountId}&limit=50`);
-      // Handle both paginated {data: [], meta: {}} and raw array responses
-      // Note: apiClient.get already unwraps the outer {data} envelope,
-      // so response is either PostItem[] or {data: PostItem[], meta: ...}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rawPosts: any[] = Array.isArray(response)
-        ? response
-        : Array.isArray((response as any)?.data)
-          ? (response as any).data
-          : [];
+      let response = await apiClient.get<any>(`/posts?socialAccountId=${accountId}&limit=50`);
+      let rawPosts = parsePostResponse(response);
+
+      // Fallback: if no posts found via socialAccountId filter, fetch recent posts overall
+      if (rawPosts.length === 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        response = await apiClient.get<any>('/posts?limit=20');
+        rawPosts = parsePostResponse(response);
+      }
+
       setPosts(rawPosts.map(mapApiToPost));
     } catch {
       // Posts are non-fatal — page still usable without them
@@ -477,6 +490,32 @@ export default function AccountDetailPage(): React.JSX.Element {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  // ---------------------------------------------------------------------------
+  // Sync posts from platform
+  // ---------------------------------------------------------------------------
+
+  const handleSync = useCallback(async (): Promise<void> => {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const result = await apiClient.post<{ synced: number; message: string }>(
+        `/social-accounts/${accountId}/sync`,
+        {},
+      );
+      const synced = result?.synced ?? 0;
+      const message = result?.message ?? 'Sync complete';
+      setSyncMessage(message);
+      if (synced > 0) {
+        await fetchPosts();
+      }
+    } catch (err) {
+      console.error('Sync failed:', err);
+      setSyncMessage('Sync failed — check console for details');
+    } finally {
+      setSyncing(false);
+    }
+  }, [accountId, fetchPosts]);
 
   // ---------------------------------------------------------------------------
   // Filtered posts
@@ -540,13 +579,32 @@ export default function AccountDetailPage(): React.JSX.Element {
 
   return (
     <div className="space-y-6">
-      {/* Back button */}
-      <button
-        onClick={() => router.push('/dashboard/social-accounts')}
-        className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to accounts
-      </button>
+      {/* Back button + sync button row */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => router.push('/dashboard/social-accounts')}
+          className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to accounts
+        </button>
+        <div className="flex items-center gap-3">
+          {syncMessage && (
+            <span className="text-xs text-slate-500">{syncMessage}</span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleSync()}
+            disabled={syncing}
+            className="gap-1.5"
+          >
+            {syncing
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />}
+            {syncing ? 'Syncing...' : 'Sync Posts'}
+          </Button>
+        </div>
+      </div>
 
       {/* Profile header */}
       <ProfileHeader profile={profile} />

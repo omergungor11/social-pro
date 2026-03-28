@@ -429,6 +429,149 @@ export class SocialAccountService {
   }
 
   // ---------------------------------------------------------------------------
+  // Sync posts from platform
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetches recent posts/media from the connected social platform and creates
+   * Post + PostTarget records for any items not yet in the database.
+   *
+   * Supports INSTAGRAM and FACEBOOK. Returns the count of newly synced posts.
+   * Never throws on platform API failure — returns synced=0 with an error message.
+   */
+  async syncFromPlatform(
+    agencyId: string,
+    accountId: string,
+  ): Promise<{ synced: number; message: string }> {
+    const account = await this.prisma.socialAccount.findFirst({
+      where: { id: accountId, agencyId },
+    });
+
+    if (!account) {
+      throw new NotFoundException(`Social account '${accountId}' not found`);
+    }
+
+    let accessToken: string;
+    try {
+      accessToken = this.encryption.decrypt(account.accessToken);
+    } catch {
+      return { synced: 0, message: "Could not decrypt access token — please reconnect this account" };
+    }
+
+    const platform = account.platform;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let posts: any[] = [];
+
+    try {
+      if (platform === SocialPlatform.INSTAGRAM) {
+        const url =
+          `https://graph.facebook.com/v22.0/${account.platformUserId}/media` +
+          `?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,like_count,comments_count` +
+          `&limit=25&access_token=${accessToken}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = (await response.json()) as { data?: any[] };
+          posts = data.data ?? [];
+        } else {
+          const text = await response.text();
+          this.logger.warn(
+            `Instagram media fetch failed for account ${accountId}: ${response.status} ${text}`,
+          );
+          return { synced: 0, message: `Instagram API returned ${response.status}` };
+        }
+      } else if (platform === SocialPlatform.FACEBOOK) {
+        const url =
+          `https://graph.facebook.com/v22.0/${account.platformUserId}/posts` +
+          `?fields=id,message,created_time,full_picture` +
+          `&limit=25&access_token=${accessToken}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = (await response.json()) as { data?: any[] };
+          posts = data.data ?? [];
+        } else {
+          const text = await response.text();
+          this.logger.warn(
+            `Facebook posts fetch failed for account ${accountId}: ${response.status} ${text}`,
+          );
+          return { synced: 0, message: `Facebook API returned ${response.status}` };
+        }
+      } else {
+        return { synced: 0, message: `Sync not yet supported for ${platform}` };
+      }
+    } catch (err) {
+      this.logger.error(
+        `Platform API call failed during sync for account ${accountId}: ${String(err)}`,
+      );
+      return { synced: 0, message: "Platform API call failed — check logs" };
+    }
+
+    // Resolve the user who will be the post creator (first agency member)
+    const firstMember = await this.prisma.agencyMember.findFirst({
+      where: { agencyId },
+    });
+
+    if (!firstMember) {
+      return { synced: 0, message: "No agency member found to attribute posts to" };
+    }
+
+    let synced = 0;
+
+    for (const p of posts) {
+      const platformPostId = (p.id as string | undefined) ?? null;
+      if (!platformPostId) continue;
+
+      // Skip posts already synced for this social account
+      const existing = await this.prisma.postTarget.findFirst({
+        where: { platformPostId, socialAccountId: accountId },
+      });
+      if (existing) continue;
+
+      const captionText: string =
+        ((p.caption as string | undefined) ?? (p.message as string | undefined) ?? "").slice(0, 2000);
+
+      const rawTimestamp: string | undefined =
+        (p.timestamp as string | undefined) ?? (p.created_time as string | undefined);
+      const publishedAt = rawTimestamp ? new Date(rawTimestamp) : new Date();
+
+      try {
+        await this.prisma.post.create({
+          data: {
+            agencyId,
+            createdByUserId: firstMember.userId,
+            clientId: account.clientId ?? null,
+            title: captionText.slice(0, 100) || "Synced post",
+            content: { text: captionText },
+            status: "PUBLISHED",
+            publishedAt,
+            targets: {
+              create: {
+                socialAccountId: accountId,
+                platformPostId,
+                status: "PUBLISHED",
+                publishedAt,
+              },
+            },
+          },
+        });
+        synced++;
+      } catch (err) {
+        // Log and continue — one failed insert should not abort the whole sync
+        this.logger.warn(
+          `Failed to create post for platformPostId=${platformPostId}: ${String(err)}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Sync completed for account ${accountId}: synced=${synced} platform=${platform}`,
+    );
+
+    return { synced, message: `Synced ${synced} post${synced === 1 ? "" : "s"} from ${platform}` };
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers used by the token refresh job
   // ---------------------------------------------------------------------------
 

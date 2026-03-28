@@ -239,6 +239,28 @@ export class SocialAccountController {
   }
 
   // ---------------------------------------------------------------------------
+  // Sync posts from platform
+  // ---------------------------------------------------------------------------
+
+  @Post(":id/sync")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Sync posts from platform",
+    description:
+      "Fetches recent posts/media from the connected social platform and stores them locally. " +
+      "Currently supports INSTAGRAM and FACEBOOK. Returns a count of newly synced posts.",
+  })
+  @ApiParam({ name: "id", description: "Social account ID" })
+  @ApiResponse({ status: 200, description: "Sync completed" })
+  @ApiResponse({ status: 404, description: "Social account not found" })
+  async syncFromPlatform(
+    @CurrentAgency() agencyId: string,
+    @Param("id") accountId: string,
+  ): Promise<{ synced: number; message: string }> {
+    return this.socialAccountService.syncFromPlatform(agencyId, accountId);
+  }
+
+  // ---------------------------------------------------------------------------
   // Health check
   // ---------------------------------------------------------------------------
 
