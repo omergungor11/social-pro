@@ -110,6 +110,7 @@ export class PostService {
             select: { id: true, status: true, publishedAt: true, socialAccount: { select: { platform: true, displayName: true } } },
           },
           client: { select: { id: true, name: true } },
+          media: { select: { id: true, url: true, thumbnailUrl: true, mediaType: true }, orderBy: { sortOrder: "asc" }, take: 1 },
         },
         orderBy: [{ createdAt: "desc" }],
         skip,

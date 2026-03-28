@@ -568,6 +568,17 @@ export class SocialAccountService {
         (p.timestamp as string | undefined) ?? (p.created_time as string | undefined);
       const publishedAt = rawTimestamp ? new Date(rawTimestamp) : new Date();
 
+      // Extract media URL from platform response
+      const mediaUrl: string | null =
+        (p.media_url as string | undefined) ??
+        (p.thumbnail_url as string | undefined) ??
+        (p.full_picture as string | undefined) ??
+        null;
+      const mediaType: string =
+        (p.media_type as string | undefined) === "VIDEO" ? "VIDEO"
+        : (p.media_type as string | undefined) === "CAROUSEL_ALBUM" ? "IMAGE"
+        : "IMAGE";
+
       try {
         await this.prisma.post.create({
           data: {
@@ -586,6 +597,17 @@ export class SocialAccountService {
                 publishedAt,
               },
             },
+            ...(mediaUrl ? {
+              media: {
+                create: {
+                  mediaType: mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
+                  url: mediaUrl,
+                  thumbnailUrl: (p.thumbnail_url as string | undefined) ?? mediaUrl,
+                  mimeType: mediaType === "VIDEO" ? "video/mp4" : "image/jpeg",
+                  sortOrder: 0,
+                },
+              },
+            } : {}),
           },
         });
         synced++;

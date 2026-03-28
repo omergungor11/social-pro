@@ -130,10 +130,16 @@ function mapApiToPost(p: any): PostItem {
       ? rawStatus
       : rawStatus;
 
+  // Extract thumbnail from media array or direct fields
+  const mediaArr = (p.media ?? p.postMedia ?? []) as Array<{ url?: string; thumbnailUrl?: string; mediaType?: string }>;
+  const firstMedia = mediaArr[0];
+  const thumbnail = firstMedia?.thumbnailUrl ?? firstMedia?.url ?? null;
+  const postType = firstMedia?.mediaType === 'VIDEO' ? 'video' : 'post';
+
   return {
     id: p.id as string,
-    thumbnail: null,
-    type: 'post' as const,
+    thumbnail,
+    type: postType as 'post' | 'video',
     caption: content,
     publishedAt: (p.publishedAt ?? p.createdAt ?? '') as string,
     likes: 0,
