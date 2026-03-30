@@ -203,9 +203,9 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
       {/* Profile info */}
       <div className="px-4 sm:px-6 pb-6">
         {/* Avatar row */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4 -mt-10 sm:-mt-12">
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4 -mt-12 sm:-mt-16">
           <div className="relative">
-            <div className="h-20 w-20 sm:h-28 sm:w-28 rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-2xl sm:text-4xl font-bold shadow-lg overflow-hidden">
+            <div className="h-24 w-24 sm:h-32 sm:w-32 rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-3xl sm:text-5xl font-bold shadow-lg overflow-hidden">
               {profile.avatarUrl ? (
                 <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
               ) : (
@@ -213,7 +213,7 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
               )}
             </div>
             <div className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2">
-              <PlatformIcon platform={profile.platform} size="sm" />
+              <PlatformIcon platform={profile.platform} size="md" />
             </div>
           </div>
 
@@ -392,7 +392,7 @@ function PostGrid({ posts, accountId }: { posts: PostItem[]; accountId: string }
             )}
 
             {/* Hover overlay */}
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 text-white">
+            <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 text-white">
               <span className="flex items-center gap-1 text-sm font-semibold">
                 <Heart className="h-4 w-4" fill="white" /> {fmt(post.likes)}
               </span>
