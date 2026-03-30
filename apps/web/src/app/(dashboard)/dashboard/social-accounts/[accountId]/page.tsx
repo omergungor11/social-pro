@@ -485,13 +485,31 @@ export default function AccountDetailPage(): React.JSX.Element {
   // Initial load
   // ---------------------------------------------------------------------------
 
+  // Auto-sync: trigger sync on page load (backend skips if recently synced)
+  const autoSync = useCallback(async (): Promise<void> => {
+    try {
+      const result = await apiClient.post<{ synced: number; message: string; skipped?: boolean }>(
+        `/social-accounts/${accountId}/sync`,
+        {},
+      );
+      if (result?.synced > 0) {
+        setSyncMessage(`${result.synced} new post${result.synced > 1 ? 's' : ''} synced`);
+      }
+    } catch {
+      // Auto-sync is non-fatal
+    }
+  }, [accountId]);
+
   const loadAll = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     setNotFound(false);
-    await Promise.all([fetchProfile(), fetchPosts()]);
+    await fetchProfile();
+    // Auto-sync first (backend handles cooldown), then fetch posts
+    await autoSync();
+    await fetchPosts();
     setLoading(false);
-  }, [fetchProfile, fetchPosts]);
+  }, [fetchProfile, fetchPosts, autoSync]);
 
   useEffect(() => {
     void loadAll();
@@ -505,8 +523,8 @@ export default function AccountDetailPage(): React.JSX.Element {
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const result = await apiClient.post<{ synced: number; message: string }>(
-        `/social-accounts/${accountId}/sync`,
+      const result = await apiClient.post<{ synced: number; message: string; skipped?: boolean }>(
+        `/social-accounts/${accountId}/sync?force=true`,
         {},
       );
       const synced = result?.synced ?? 0;

@@ -442,13 +442,22 @@ export class SocialAccountService {
   async syncFromPlatform(
     agencyId: string,
     accountId: string,
-  ): Promise<{ synced: number; message: string }> {
+    force = false,
+  ): Promise<{ synced: number; message: string; skipped?: boolean }> {
     const account = await this.prisma.socialAccount.findFirst({
       where: { id: accountId, agencyId },
     });
 
     if (!account) {
       throw new NotFoundException(`Social account '${accountId}' not found`);
+    }
+
+    // Skip sync if last sync was less than 10 minutes ago (unless forced)
+    if (!force && account.lastSyncedAt) {
+      const elapsed = Date.now() - new Date(account.lastSyncedAt).getTime();
+      if (elapsed < 10 * 60 * 1000) {
+        return { synced: 0, message: "Recently synced — skipping", skipped: true };
+      }
     }
 
     let accessToken: string;
@@ -618,6 +627,12 @@ export class SocialAccountService {
         );
       }
     }
+
+    // Update lastSyncedAt
+    await this.prisma.socialAccount.update({
+      where: { id: accountId },
+      data: { lastSyncedAt: new Date() },
+    });
 
     this.logger.log(
       `Sync completed for account ${accountId}: synced=${synced} platform=${platform}`,

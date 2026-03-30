@@ -256,8 +256,9 @@ export class SocialAccountController {
   async syncFromPlatform(
     @CurrentAgency() agencyId: string,
     @Param("id") accountId: string,
-  ): Promise<{ synced: number; message: string }> {
-    return this.socialAccountService.syncFromPlatform(agencyId, accountId);
+    @Query("force") force?: string,
+  ): Promise<{ synced: number; message: string; skipped?: boolean }> {
+    return this.socialAccountService.syncFromPlatform(agencyId, accountId, force === "true");
   }
 
   // ---------------------------------------------------------------------------
