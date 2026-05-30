@@ -29,8 +29,6 @@ export class LinkedinConnector implements OAuthConnector {
     "profile",
     "email",
     "w_member_social",
-    "w_organization_social",
-    "r_organization_social",
   ];
 
   getAuthUrl(
@@ -171,6 +169,7 @@ export class LinkedinConnector implements OAuthConnector {
 
     return {
       platformUserId: data.sub,
+      username: data.email,
       displayName,
       avatarUrl: data.picture,
     };

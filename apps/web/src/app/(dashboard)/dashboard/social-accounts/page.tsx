@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { AccountCard } from '@/components/social/account-card';
 import { ConnectDialog } from '@/components/social/connect-dialog';
+import { FacebookPageSelectDialog, type FacebookPage } from '@/components/social/facebook-page-select-dialog';
+import { InstagramAccountSelectDialog, type InstagramAccount } from '@/components/social/instagram-account-select-dialog';
 import type { SocialAccount } from '@/components/social/account-card';
 import type { Platform } from '@/components/social/platform-icon';
 import { apiClient } from '@/lib/api-client';
@@ -205,6 +207,10 @@ function SocialAccountsContent(): React.JSX.Element {
   const [loading, setLoading] = React.useState(true);
   const [activeFilter, setActiveFilter] = React.useState<FilterValue>('all');
   const [connectOpen, setConnectOpen] = React.useState(false);
+  const [facebookPages, setFacebookPages] = React.useState<FacebookPage[]>([]);
+  const [facebookSelectOpen, setFacebookSelectOpen] = React.useState(false);
+  const [instagramAccounts, setInstagramAccounts] = React.useState<InstagramAccount[]>([]);
+  const [instagramSelectOpen, setInstagramSelectOpen] = React.useState(false);
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Fetch accounts from API
@@ -228,12 +234,42 @@ function SocialAccountsContent(): React.JSX.Element {
     const connected = searchParams.get('connected');
     const platform = searchParams.get('platform');
     const error = searchParams.get('error');
+    const selectPages = searchParams.get('selectPages');
+    const pagesData = searchParams.get('pages');
+    const selectInstagram = searchParams.get('selectInstagram');
+    const accountsData = searchParams.get('accounts');
 
-    if (connected && platform) {
-      setToast({ message: `${platform.charAt(0).toUpperCase() + platform.slice(1)} account connected successfully!`, type: 'success' });
-      // Clean up URL params
+    const base64UrlDecode = (s: string): string => {
+      try {
+        return typeof atob === 'function'
+          ? atob(s.replace(/-/g, '+').replace(/_/g, '/'))
+          : Buffer.from(s, 'base64url').toString('utf8');
+      } catch {
+        return '';
+      }
+    };
+
+    if (selectPages === 'true' && pagesData) {
+      try {
+        const decoded = JSON.parse(base64UrlDecode(pagesData)) as FacebookPage[];
+        setFacebookPages(decoded);
+        setFacebookSelectOpen(true);
+      } catch {
+        setToast({ message: 'Failed to parse Facebook pages data', type: 'error' });
+      }
       router.replace('/dashboard/social-accounts', { scroll: false });
-      // Refetch to get new account
+    } else if (selectInstagram === 'true' && accountsData) {
+      try {
+        const decoded = JSON.parse(base64UrlDecode(accountsData)) as InstagramAccount[];
+        setInstagramAccounts(decoded);
+        setInstagramSelectOpen(true);
+      } catch {
+        setToast({ message: 'Failed to parse Instagram accounts data', type: 'error' });
+      }
+      router.replace('/dashboard/social-accounts', { scroll: false });
+    } else if (connected && platform) {
+      setToast({ message: `${platform.charAt(0).toUpperCase() + platform.slice(1)} account connected successfully!`, type: 'success' });
+      router.replace('/dashboard/social-accounts', { scroll: false });
       void fetchAccounts();
     } else if (error) {
       setToast({ message: `Connection failed: ${error}`, type: 'error' });
@@ -332,6 +368,36 @@ function SocialAccountsContent(): React.JSX.Element {
       </div>
 
       <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
+
+      <FacebookPageSelectDialog
+        open={facebookSelectOpen}
+        pages={facebookPages}
+        onClose={() => {
+          setFacebookSelectOpen(false);
+          setFacebookPages([]);
+        }}
+        onConnected={() => {
+          setFacebookSelectOpen(false);
+          setFacebookPages([]);
+          setToast({ message: 'Facebook pages connected successfully!', type: 'success' });
+          void fetchAccounts();
+        }}
+      />
+
+      <InstagramAccountSelectDialog
+        open={instagramSelectOpen}
+        accounts={instagramAccounts}
+        onClose={() => {
+          setInstagramSelectOpen(false);
+          setInstagramAccounts([]);
+        }}
+        onConnected={() => {
+          setInstagramSelectOpen(false);
+          setInstagramAccounts([]);
+          setToast({ message: 'Instagram accounts connected successfully!', type: 'success' });
+          void fetchAccounts();
+        }}
+      />
     </>
   );
 }

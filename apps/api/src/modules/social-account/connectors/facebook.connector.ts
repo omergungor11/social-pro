@@ -28,8 +28,7 @@ export class FacebookConnector implements OAuthConnector {
     "pages_read_engagement",
     "pages_manage_posts",
     "pages_manage_metadata",
-    "pages_read_user_content",
-    "read_insights",
+    "business_management",
   ];
 
   getAuthUrl(
@@ -51,6 +50,16 @@ export class FacebookConnector implements OAuthConnector {
     });
 
     return `${this.authUrl}?${params.toString()}`;
+  }
+
+  /**
+   * Stores the short-lived user token from the most recent code exchange.
+   * getPages() should be called with this token before it expires.
+   */
+  private lastShortLivedToken: string | null = null;
+
+  getLastShortLivedToken(): string | null {
+    return this.lastShortLivedToken;
   }
 
   async exchangeCode(
@@ -80,6 +89,9 @@ export class FacebookConnector implements OAuthConnector {
       token_type: string;
       expires_in?: number;
     };
+
+    // Save short-lived token for getPages() call
+    this.lastShortLivedToken = shortLived.access_token;
 
     // Step 2: exchange short-lived token for long-lived token (~60 days)
     return this.exchangeForLongLivedToken(shortLived.access_token, credentials);
@@ -161,6 +173,125 @@ export class FacebookConnector implements OAuthConnector {
     } catch {
       // Best-effort revocation
     }
+  }
+
+  async getPages(accessToken: string): Promise<Array<{
+    id: string;
+    name: string;
+    accessToken: string;
+    pictureUrl?: string;
+    followersCount?: number;
+    category?: string;
+  }>> {
+    type PageItem = {
+      id: string;
+      name: string;
+      access_token: string;
+      picture?: { data?: { url?: string } };
+      fan_count?: number;
+      followers_count?: number;
+      category?: string;
+    };
+
+    const allPages: PageItem[] = [];
+
+    let url =
+      `https://graph.facebook.com/${this.apiVersion}/me/accounts` +
+      `?fields=id,name,access_token,picture{url},fan_count,followers_count,category` +
+      `&limit=100&access_token=${accessToken}`;
+
+    // Follow pagination
+    while (url) {
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log("[FacebookConnector] /me/accounts error:", errorText);
+        throw new UnauthorizedException(
+          `Failed to fetch Facebook pages: ${errorText}`,
+        );
+      }
+
+      const data = (await response.json()) as {
+        data?: PageItem[];
+        paging?: { next?: string };
+      };
+
+      console.log("[FacebookConnector] /me/accounts page:", data.data?.length ?? 0, "pages:", data.data?.map(p => p.name));
+
+      if (data.data) {
+        allPages.push(...data.data);
+      }
+
+      url = data.paging?.next ?? "";
+    }
+
+    console.log("[FacebookConnector] /me/accounts total:", allPages.length, allPages.map(p => p.name));
+
+    // Also fetch pages from Business Manager (if user has business_management permission)
+    try {
+      const bizResp = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/me/businesses?fields=id,name&access_token=${accessToken}`,
+      );
+      if (bizResp.ok) {
+        const bizData = (await bizResp.json()) as { data?: Array<{ id: string; name: string }> };
+        const businesses = bizData.data ?? [];
+        console.log("[FacebookConnector] Businesses found:", businesses.length, businesses.map(b => b.name));
+
+        const existingPageIds = new Set(allPages.map((p) => p.id));
+
+        for (const biz of businesses) {
+          // owned_pages
+          const ownedResp = await fetch(
+            `https://graph.facebook.com/${this.apiVersion}/${biz.id}/owned_pages` +
+            `?fields=id,name,access_token,picture{url},fan_count,followers_count,category` +
+            `&limit=100&access_token=${accessToken}`,
+          );
+          if (ownedResp.ok) {
+            const ownedData = (await ownedResp.json()) as { data?: PageItem[] };
+            for (const page of ownedData.data ?? []) {
+              if (!existingPageIds.has(page.id)) {
+                allPages.push(page);
+                existingPageIds.add(page.id);
+                console.log("[FacebookConnector] Business page added:", page.name);
+              }
+            }
+          }
+
+          // client_pages
+          const clientResp = await fetch(
+            `https://graph.facebook.com/${this.apiVersion}/${biz.id}/client_pages` +
+            `?fields=id,name,access_token,picture{url},fan_count,followers_count,category` +
+            `&limit=100&access_token=${accessToken}`,
+          );
+          if (clientResp.ok) {
+            const clientData = (await clientResp.json()) as { data?: PageItem[] };
+            for (const page of clientData.data ?? []) {
+              if (!existingPageIds.has(page.id)) {
+                allPages.push(page);
+                existingPageIds.add(page.id);
+                console.log("[FacebookConnector] Client page added:", page.name);
+              }
+            }
+          }
+        }
+      } else {
+        console.log("[FacebookConnector] /me/businesses failed (no business_management permission?):", bizResp.status);
+      }
+    } catch (err) {
+      console.log("[FacebookConnector] Business pages fetch error (non-fatal):", err);
+    }
+
+    console.log("[FacebookConnector] Total pages found:", allPages.length, allPages.map(p => p.name));
+
+    return allPages.map((page) => ({
+      id: page.id,
+      name: page.name,
+      accessToken: page.access_token,
+      pictureUrl: page.picture?.data?.url,
+      followersCount: page.followers_count ?? page.fan_count ?? 0,
+      category: page.category,
+    }));
   }
 
   async getUserProfile(accessToken: string): Promise<SocialProfile> {

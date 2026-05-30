@@ -193,9 +193,14 @@ export class TwitterConnector implements OAuthConnector {
     // Best-effort revocation — do not throw on non-2xx
   }
 
-  async getUserProfile(accessToken: string): Promise<SocialProfile> {
+  async getUserProfile(accessToken: string): Promise<SocialProfile & {
+    followersCount?: number;
+    followingCount?: number;
+    tweetCount?: number;
+    description?: string;
+  }> {
     const params = new URLSearchParams({
-      "user.fields": "id,name,username,profile_image_url",
+      "user.fields": "id,name,username,profile_image_url,description,public_metrics",
     });
 
     const response = await fetch(`${this.profileUrl}?${params.toString()}`, {
@@ -215,6 +220,12 @@ export class TwitterConnector implements OAuthConnector {
         name: string;
         username: string;
         profile_image_url?: string;
+        description?: string;
+        public_metrics?: {
+          followers_count?: number;
+          following_count?: number;
+          tweet_count?: number;
+        };
       };
     };
 
@@ -223,6 +234,10 @@ export class TwitterConnector implements OAuthConnector {
       username: json.data.username,
       displayName: json.data.name,
       avatarUrl: json.data.profile_image_url,
+      description: json.data.description,
+      followersCount: json.data.public_metrics?.followers_count,
+      followingCount: json.data.public_metrics?.following_count,
+      tweetCount: json.data.public_metrics?.tweet_count,
     };
   }
 

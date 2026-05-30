@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -7,9 +8,10 @@ import {
   Param,
   Post,
   Query,
-  Redirect,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import type { Response } from "express";
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -30,6 +32,7 @@ import {
 } from "./social-account.service";
 import { PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
+import { SelectFacebookPageDto } from "./dto/select-facebook-page.dto";
 
 @ApiTags("Social Accounts")
 @ApiBearerAuth()
@@ -117,7 +120,6 @@ export class SocialAccountController {
 
   @Get("oauth/:platform/callback")
   @Public()
-  @Redirect()
   @ApiOperation({
     summary: "Handle OAuth callback from platform",
     description:
@@ -142,34 +144,146 @@ export class SocialAccountController {
     @Query("code") code: string,
     @Query("state") state: string,
     @Query("error") error?: string,
-  ): Promise<{ url: string }> {
+    @Res() res?: Response,
+  ): Promise<void> {
     const frontendUrl =
       process.env["FRONTEND_URL"] || process.env["CORS_ORIGIN"] || "http://localhost:3000";
 
+    const redirect = (url: string): void => {
+      res!.redirect(302, url);
+    };
+
     if (error) {
-      return {
-        url: `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent(error)}`,
-      };
+      return redirect(
+        `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent(error)}`,
+      );
     }
 
     try {
       const socialPlatform = this.parsePlatform(platform);
+
+      // Facebook: use page selection flow
+      if (socialPlatform === SocialPlatform.FACEBOOK) {
+        const result = await this.socialAccountService.handleFacebookCallback(
+          code,
+          state,
+        );
+
+        if (result.type === "none") {
+          return redirect(
+            `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent("No Facebook Pages found. Please create a Facebook Page first.")}`,
+          );
+        }
+
+        // Show page selection modal (even for single page — let user confirm)
+        // Access tokens are kept server-side in cache — NOT sent to frontend
+        const pagesData = (result.pages ?? []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          pictureUrl: p.pictureUrl,
+          followersCount: p.followersCount,
+          category: p.category,
+        }));
+        const encoded = Buffer.from(JSON.stringify(pagesData)).toString("base64url");
+
+        return redirect(
+          `${frontendUrl}/dashboard/social-accounts?selectPages=true&pages=${encoded}&agencyId=${result.agencyId}`,
+        );
+      }
+
+      // Instagram: account selection flow (multiple IG accounts across pages)
+      if (socialPlatform === SocialPlatform.INSTAGRAM) {
+        const result = await this.socialAccountService.handleInstagramCallback(
+          code,
+          state,
+        );
+
+        if (result.type === "none") {
+          return redirect(
+            `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent("No Instagram Business accounts found. Make sure your Instagram is linked to a Facebook Page.")}`,
+          );
+        }
+
+        const accountsData = (result.accounts ?? []).map((a) => ({
+          igId: a.igId,
+          username: a.username,
+          name: a.name,
+          profilePictureUrl: a.profilePictureUrl,
+          followersCount: a.followersCount,
+        }));
+        const encoded = Buffer.from(JSON.stringify(accountsData)).toString("base64url");
+
+        return redirect(
+          `${frontendUrl}/dashboard/social-accounts?selectInstagram=true&accounts=${encoded}&agencyId=${result.agencyId}`,
+        );
+      }
+
+      // All other platforms: existing flow
       const account = await this.socialAccountService.handleCallback(
         socialPlatform,
         code,
         state,
       );
 
-      return {
-        url: `${frontendUrl}/dashboard/social-accounts?connected=${account.id}&platform=${platform}`,
-      };
+      return redirect(
+        `${frontendUrl}/dashboard/social-accounts?connected=${account.id}&platform=${platform}`,
+      );
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "OAuth callback failed";
-      return {
-        url: `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent(message)}`,
-      };
+      return redirect(
+        `${frontendUrl}/dashboard/social-accounts?error=${encodeURIComponent(message)}`,
+      );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Facebook Page selection
+  // ---------------------------------------------------------------------------
+
+  @Post("oauth/facebook/select-page")
+  @ApiOperation({
+    summary: "Connect a selected Facebook Page",
+    description:
+      "After the Facebook OAuth callback returns multiple pages, " +
+      "the frontend calls this endpoint with the selected page details " +
+      "to finalize the connection.",
+  })
+  @ApiResponse({ status: 201, description: "Facebook page connected" })
+  @ApiResponse({ status: 400, description: "Invalid request" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  async selectFacebookPage(
+    @CurrentAgency() agencyId: string,
+    @Body() body: SelectFacebookPageDto,
+  ): Promise<SocialAccountPublic> {
+    return this.socialAccountService.connectFacebookPage(agencyId, {
+      pageId: body.pageId,
+      pageName: body.pageName,
+      pictureUrl: body.pictureUrl,
+      followersCount: body.followersCount,
+      category: body.category,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Instagram account selection
+  // ---------------------------------------------------------------------------
+
+  @Post("oauth/instagram/select-account")
+  @ApiOperation({
+    summary: "Connect a selected Instagram account",
+    description:
+      "After the Instagram OAuth callback returns multiple IG accounts, " +
+      "the frontend calls this endpoint with the selected account details.",
+  })
+  @ApiResponse({ status: 201, description: "Instagram account connected" })
+  @ApiResponse({ status: 400, description: "Invalid request" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  async selectInstagramAccount(
+    @CurrentAgency() agencyId: string,
+    @Body() body: { igId: string; username?: string; name?: string; profilePictureUrl?: string; followersCount?: number },
+  ): Promise<SocialAccountPublic> {
+    return this.socialAccountService.connectInstagramAccount(agencyId, body);
   }
 
   // ---------------------------------------------------------------------------

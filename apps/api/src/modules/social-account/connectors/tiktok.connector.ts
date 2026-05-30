@@ -26,11 +26,7 @@ export class TiktokConnector implements OAuthConnector {
     "https://open.tiktokapis.com/v2/user/info/";
   private readonly scopes = [
     "user.info.basic",
-    "user.info.profile",
-    "user.info.stats",
     "video.list",
-    "video.upload",
-    "video.publish",
   ];
 
   getAuthUrl(
@@ -167,7 +163,7 @@ export class TiktokConnector implements OAuthConnector {
 
   async getUserProfile(accessToken: string): Promise<SocialProfile> {
     const params = new URLSearchParams({
-      fields: "open_id,union_id,avatar_url,display_name,username",
+      fields: "open_id,union_id,avatar_url,display_name,username,follower_count,following_count,likes_count",
     });
 
     const response = await fetch(`${this.profileUrl}?${params.toString()}`, {

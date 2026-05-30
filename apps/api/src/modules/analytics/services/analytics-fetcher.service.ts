@@ -202,18 +202,83 @@ export class AnalyticsFetcherService {
   private async callPlatformAccountApi(
     platform: SocialPlatform,
     platformUserId: string,
-    _accessToken: string
+    accessToken: string
   ): Promise<PlatformAccountMetrics> {
     this.logger.debug(
       `callPlatformAccountApi: platform=${platform} platformUserId=${platformUserId}`
     );
 
-    // Stub: return simulated metrics. Replace with real platform API calls.
-    return Promise.resolve({
-      followers: 0,
-      engagementRate: 0,
-      impressions: 0,
-    });
+    if (platform === SocialPlatform.INSTAGRAM) {
+      try {
+        const url =
+          `https://graph.facebook.com/v22.0/${platformUserId}` +
+          `?fields=followers_count,media_count` +
+          `&access_token=${accessToken}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = (await response.json()) as {
+            followers_count?: number;
+            media_count?: number;
+          };
+          return {
+            followers: data.followers_count ?? 0,
+            engagementRate: 0,
+            impressions: 0,
+          };
+        }
+        this.logger.warn(`Instagram metrics fetch failed: ${response.status}`);
+      } catch (err) {
+        this.logger.warn(`Instagram metrics API error: ${String(err)}`);
+      }
+    }
+
+    if (platform === SocialPlatform.FACEBOOK) {
+      try {
+        const url =
+          `https://graph.facebook.com/v22.0/${platformUserId}` +
+          `?fields=followers_count,fan_count` +
+          `&access_token=${accessToken}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = (await response.json()) as {
+            followers_count?: number;
+            fan_count?: number;
+          };
+          return {
+            followers: data.followers_count ?? data.fan_count ?? 0,
+            engagementRate: 0,
+            impressions: 0,
+          };
+        }
+        this.logger.warn(`Facebook metrics fetch failed: ${response.status}`);
+      } catch (err) {
+        this.logger.warn(`Facebook metrics API error: ${String(err)}`);
+      }
+    }
+
+    if (platform === SocialPlatform.TWITTER) {
+      try {
+        const response = await fetch(
+          `https://api.twitter.com/2/users/${platformUserId}?user.fields=public_metrics`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (response.ok) {
+          const json = (await response.json()) as {
+            data?: { public_metrics?: { followers_count?: number } };
+          };
+          return {
+            followers: json.data?.public_metrics?.followers_count ?? 0,
+            engagementRate: 0,
+            impressions: 0,
+          };
+        }
+        this.logger.warn(`Twitter metrics fetch failed: ${response.status}`);
+      } catch (err) {
+        this.logger.warn(`Twitter metrics API error: ${String(err)}`);
+      }
+    }
+
+    return { followers: 0, engagementRate: 0, impressions: 0 };
   }
 
   /**

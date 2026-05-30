@@ -41,7 +41,12 @@
       "Bash(sed -i '' 's/PORT=6000/PORT=4000/' /Users/arlec/Desktop/Work/social-pro/apps/api/.env)",
       "Bash(sed -i '' 's/localhost:6000/localhost:4000/g' /Users/arlec/Desktop/Work/social-pro/apps/api/.env /Users/arlec/Desktop/Work/social-pro/apps/web/.env.local)",
       "Bash(/tmp/deployment_info.txt:*)",
-      "Bash(vercel logs:*)"
+      "Bash(vercel logs:*)",
+      "WebFetch(domain:docs.x.com)",
+      "Bash(pkill -f \"nest start\")",
+      "Bash(pkill -f \"turbo.*dev\")",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(python3 -m json.tool)"
     ]
   },
   "hooks": {

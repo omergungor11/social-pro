@@ -136,14 +136,20 @@ function mapApiToPost(p: any): PostItem {
   const thumbnail = firstMedia?.thumbnailUrl ?? firstMedia?.url ?? null;
   const postType = firstMedia?.mediaType === 'VIDEO' ? 'video' : 'post';
 
+  // Extract likes/comments from targets' platformSpecificContent
+  const targets = (p.targets ?? []) as Array<{ platformSpecificContent?: { likes?: number; comments?: number } }>;
+  const targetMetrics = targets[0]?.platformSpecificContent;
+  const likes = (targetMetrics?.likes as number | undefined) ?? 0;
+  const comments = (targetMetrics?.comments as number | undefined) ?? 0;
+
   return {
     id: p.id as string,
     thumbnail,
     type: postType as 'post' | 'video',
     caption: content,
     publishedAt: (p.publishedAt ?? p.createdAt ?? '') as string,
-    likes: 0,
-    comments: 0,
+    likes,
+    comments,
     impressions: 0,
     saves: 0,
     shares: 0,
@@ -191,10 +197,18 @@ function MiniBarChart({ data, label }: { data: number[]; label: string }): React
 function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Element {
   const initial = profile.displayName.charAt(0).toUpperCase();
 
+  const headerGradientMap: Record<string, string> = {
+    instagram: 'from-purple-600 via-pink-500 to-orange-400',
+    facebook: 'from-blue-600 to-blue-700',
+    twitter: 'from-gray-900 to-gray-800',
+    linkedin: 'from-blue-700 to-blue-800',
+  };
+  const headerGradient = headerGradientMap[profile.platform] ?? 'from-slate-800 via-slate-700 to-slate-900';
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
       {/* Cover */}
-      <div className="h-32 sm:h-44 bg-gradient-to-br from-slate-800 via-slate-700 to-slate-900 relative">
+      <div className={cn('h-32 sm:h-44 bg-gradient-to-br relative', headerGradient)}>
         <div className="absolute inset-0 opacity-20" style={{
           backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'40\' height=\'40\' viewBox=\'0 0 40 40\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23fff\' fill-opacity=\'0.15\'%3E%3Cpath d=\'M20 20h20v20H20zM0 0h20v20H0z\'/%3E%3C/g%3E%3C/svg%3E")',
         }} />
@@ -228,7 +242,15 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
                 </svg>
               )}
             </div>
-            <p className="text-sm text-slate-500">@{profile.username} · {getPlatformLabel(profile.platform)}</p>
+            <p className={cn('text-sm text-slate-500', profile.platform === 'twitter' && 'text-base font-medium text-slate-600')}>
+              {profile.platform === 'twitter' ? `@${profile.username}` : `@${profile.username} · ${getPlatformLabel(profile.platform)}`}
+            </p>
+            {profile.platform === 'facebook' && (
+              <Badge variant="default" className="mt-0.5 text-[10px]">Page</Badge>
+            )}
+            {profile.platform === 'linkedin' && (
+              <Badge variant="default" className="mt-0.5 text-[10px] bg-blue-100 text-blue-700 border-blue-200">LinkedIn</Badge>
+            )}
           </div>
 
           <div className="flex gap-2 shrink-0">
@@ -248,22 +270,28 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
           <p className="mt-3 text-sm text-slate-600 whitespace-pre-line max-w-lg">{profile.bio}</p>
         )}
 
-        {/* Stats row (Instagram-style) */}
+        {/* Stats row */}
         <div className="mt-5 flex items-center gap-6 sm:gap-10 border-t border-slate-100 pt-4">
           {[
             { label: 'Posts', value: profile.stats.posts },
             { label: 'Followers', value: profile.stats.followers },
             { label: 'Following', value: profile.stats.following },
-          ].map((s) => (
+          ].filter((s) => {
+            // Hide stats that are unavailable for the platform
+            if (profile.platform === 'linkedin' && (s.label === 'Followers' || s.label === 'Following')) return false;
+            return true;
+          }).map((s) => (
             <div key={s.label} className="text-center">
               <p className="text-lg sm:text-xl font-bold text-slate-900">{fmt(s.value)}</p>
               <p className="text-xs text-slate-500">{s.label}</p>
             </div>
           ))}
-          <div className="text-center ml-auto">
-            <p className="text-lg sm:text-xl font-bold text-emerald-600">{profile.stats.engagementRate}%</p>
-            <p className="text-xs text-slate-500">Eng. Rate</p>
-          </div>
+          {profile.platform !== 'linkedin' && (
+            <div className="text-center ml-auto">
+              <p className="text-lg sm:text-xl font-bold text-emerald-600">{profile.stats.engagementRate}%</p>
+              <p className="text-xs text-slate-500">Eng. Rate</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -362,7 +390,7 @@ function PostGrid({ posts, accountId }: { posts: PostItem[]; accountId: string }
           <Link
             key={post.id}
             href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
-            className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100"
+            className="group relative aspect-[4/5] rounded-lg overflow-hidden bg-slate-100"
           >
             {/* Thumbnail */}
             <img src={thumb} alt="" className="h-full w-full object-cover" />
@@ -417,6 +445,7 @@ export default function AccountDetailPage(): React.JSX.Element {
   const accountId = params.accountId as string;
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewModeInitialized, setViewModeInitialized] = useState(false);
   const [postFilter, setPostFilter] = useState<'all' | 'published' | 'scheduled'>('all');
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -462,19 +491,15 @@ export default function AccountDetailPage(): React.JSX.Element {
 
   const fetchPosts = useCallback(async (): Promise<void> => {
     try {
-      // First: fetch posts targeted to this specific social account
+      // Fetch posts targeted to this specific social account only
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let response = await apiClient.get<any>(`/posts?socialAccountId=${accountId}&limit=50`);
-      let rawPosts = parsePostResponse(response);
+      const response = await apiClient.get<any>(`/posts?socialAccountId=${accountId}&limit=50`);
+      const rawPosts = parsePostResponse(response);
 
-      // Fallback: if no posts found via socialAccountId filter, fetch recent posts overall
-      if (rawPosts.length === 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        response = await apiClient.get<any>('/posts?limit=20');
-        rawPosts = parsePostResponse(response);
-      }
-
-      setPosts(rawPosts.map(mapApiToPost));
+      const mapped = rawPosts.map(mapApiToPost);
+      // Sort newest first
+      mapped.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      setPosts(mapped);
     } catch {
       // Posts are non-fatal — page still usable without them
       setPosts([]);
@@ -505,8 +530,9 @@ export default function AccountDetailPage(): React.JSX.Element {
     setError(null);
     setNotFound(false);
     await fetchProfile();
-    // Auto-sync first (backend handles cooldown), then fetch posts
+    // Auto-sync first (backend handles cooldown), then re-fetch profile + posts
     await autoSync();
+    await fetchProfile();
     await fetchPosts();
     setLoading(false);
   }, [fetchProfile, fetchPosts, autoSync]);
@@ -514,6 +540,15 @@ export default function AccountDetailPage(): React.JSX.Element {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  // Set default view mode based on platform (grid for Instagram, list for others)
+  useEffect(() => {
+    if (profile && !viewModeInitialized) {
+      const defaultMode = profile.platform === 'instagram' ? 'grid' : 'list';
+      setViewMode(defaultMode);
+      setViewModeInitialized(true);
+    }
+  }, [profile, viewModeInitialized]);
 
   // ---------------------------------------------------------------------------
   // Sync posts from platform
@@ -530,16 +565,16 @@ export default function AccountDetailPage(): React.JSX.Element {
       const synced = result?.synced ?? 0;
       const message = result?.message ?? 'Sync complete';
       setSyncMessage(message);
-      if (synced > 0) {
-        await fetchPosts();
-      }
+      // Always re-fetch profile (for updated followers/following) and posts
+      await fetchProfile();
+      await fetchPosts();
     } catch (err) {
       console.error('Sync failed:', err);
       setSyncMessage('Sync failed — check console for details');
     } finally {
       setSyncing(false);
     }
-  }, [accountId, fetchPosts]);
+  }, [accountId, fetchProfile, fetchPosts]);
 
   // ---------------------------------------------------------------------------
   // Filtered posts
@@ -681,35 +716,83 @@ export default function AccountDetailPage(): React.JSX.Element {
         </CardHeader>
         <CardContent>
           {filteredPosts.length === 0 ? (
-            <p className="text-center py-10 text-sm text-slate-400">No posts found</p>
+            profile.platform === 'linkedin' ? (
+              <div className="text-center py-10 space-y-2">
+                <p className="text-sm text-slate-500">LinkedIn API doesn&apos;t support reading posts.</p>
+                <p className="text-xs text-slate-400">You can create and publish posts to LinkedIn from Social Pro.</p>
+              </div>
+            ) : (
+              <p className="text-center py-10 text-sm text-slate-400">No posts found</p>
+            )
           ) : viewMode === 'grid' ? (
             <PostGrid posts={filteredPosts} accountId={accountId} />
           ) : (
             <div className="space-y-2">
               {filteredPosts.map((post, i) => {
                 const thumb = post.thumbnail ?? getPlaceholderThumbnail(i, post.caption || String(i + 1));
+                const isFacebook = profile.platform === 'facebook';
+                const isTwitter = profile.platform === 'twitter';
                 return (
                   <Link
                     key={post.id}
                     href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
-                    className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
+                    className={cn(
+                      'flex gap-3 p-3 rounded-lg border transition-colors',
+                      isTwitter
+                        ? 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                        : 'border-slate-100 hover:bg-slate-50',
+                      (isFacebook || isTwitter) ? 'flex-col sm:flex-row items-start' : 'items-center',
+                    )}
                   >
-                    <img src={thumb} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0" />
+                    {/* Thumbnail - hide for Twitter text posts without media */}
+                    {!(isTwitter && !post.thumbnail) && (
+                      <img
+                        src={thumb}
+                        alt=""
+                        className={cn(
+                          'rounded-lg object-cover shrink-0',
+                          isFacebook ? 'h-16 w-16 sm:h-20 sm:w-20' : 'h-12 w-12',
+                        )}
+                      />
+                    )}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">
+                      <p className={cn(
+                        'text-sm font-medium text-slate-800',
+                        (isFacebook || isTwitter) ? 'whitespace-pre-line line-clamp-3' : 'truncate',
+                      )}>
                         {post.caption || <span className="text-slate-400 italic">No caption</span>}
                       </p>
                       <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {post.publishedAt
                           ? new Date(post.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                          : '—'}
+                          : '---'}
                       </p>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                      <span className="flex items-center gap-1"><Heart className="h-3 w-3 text-red-400" /> {fmt(post.likes)}</span>
-                      <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-amber-500" /> {fmt(post.comments)}</span>
-                      <span className="flex items-center gap-1"><Eye className="h-3 w-3 text-blue-500" /> {fmt(post.impressions)}</span>
+                      {isFacebook ? (
+                        <>
+                          <span className="flex items-center gap-1" title="Reactions">
+                            <span className="text-sm">👍</span> {fmt(post.likes)}
+                          </span>
+                          <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-amber-500" /> {fmt(post.comments)}</span>
+                          {post.shares > 0 && (
+                            <span className="flex items-center gap-1"><Share2 className="h-3 w-3 text-blue-500" /> {fmt(post.shares)}</span>
+                          )}
+                        </>
+                      ) : isTwitter ? (
+                        <>
+                          <span className="flex items-center gap-1"><Heart className="h-3 w-3 text-red-400" /> {fmt(post.likes)}</span>
+                          <span className="flex items-center gap-1"><Share2 className="h-3 w-3 text-slate-400" /> {fmt(post.shares)}</span>
+                          <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-blue-400" /> {fmt(post.comments)}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex items-center gap-1"><Heart className="h-3 w-3 text-red-400" /> {fmt(post.likes)}</span>
+                          <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-amber-500" /> {fmt(post.comments)}</span>
+                          <span className="flex items-center gap-1"><Eye className="h-3 w-3 text-blue-500" /> {fmt(post.impressions)}</span>
+                        </>
+                      )}
                     </div>
                   </Link>
                 );

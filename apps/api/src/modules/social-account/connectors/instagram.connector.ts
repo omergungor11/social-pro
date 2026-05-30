@@ -28,6 +28,9 @@ export class InstagramConnector implements OAuthConnector {
     "instagram_manage_comments",
     "pages_show_list",
     "pages_read_engagement",
+    "pages_manage_posts",
+    "pages_manage_metadata",
+    "business_management",
   ];
 
   getAuthUrl(
@@ -202,5 +205,98 @@ export class InstagramConnector implements OAuthConnector {
       platformUserId: data.id,
       displayName: data.name,
     };
+  }
+
+  /**
+   * Fetches ALL Instagram Business/Creator accounts linked to the user's
+   * Facebook Pages — including pages managed through Business Manager.
+   */
+  async getInstagramAccounts(accessToken: string): Promise<Array<{
+    igId: string;
+    username?: string;
+    name?: string;
+    profilePictureUrl?: string;
+    followersCount?: number;
+    pageId: string;
+    pageName: string;
+    pageAccessToken: string;
+  }>> {
+    type PageWithIG = {
+      id: string;
+      name: string;
+      access_token: string;
+      instagram_business_account?: {
+        id: string;
+        username?: string;
+        name?: string;
+        profile_picture_url?: string;
+        followers_count?: number;
+      };
+    };
+
+    const allPages: PageWithIG[] = [];
+    const fields = "id,name,access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count}";
+
+    // 1. /me/accounts (personal pages)
+    let url =
+      `https://graph.facebook.com/${this.apiVersion}/me/accounts` +
+      `?fields=${fields}&limit=100&access_token=${accessToken}`;
+
+    while (url) {
+      const resp = await fetch(url);
+      if (!resp.ok) break;
+      const data = (await resp.json()) as { data?: PageWithIG[]; paging?: { next?: string } };
+      if (data.data) allPages.push(...data.data);
+      url = data.paging?.next ?? "";
+    }
+
+    // 2. Business Manager pages
+    try {
+      const bizResp = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/me/businesses?fields=id,name&access_token=${accessToken}`,
+      );
+      if (bizResp.ok) {
+        const bizData = (await bizResp.json()) as { data?: Array<{ id: string; name: string }> };
+        const existingIds = new Set(allPages.map((p) => p.id));
+
+        for (const biz of bizData.data ?? []) {
+          for (const endpoint of ["owned_pages", "client_pages"]) {
+            const resp = await fetch(
+              `https://graph.facebook.com/${this.apiVersion}/${biz.id}/${endpoint}` +
+              `?fields=${fields}&limit=100&access_token=${accessToken}`,
+            );
+            if (resp.ok) {
+              const data = (await resp.json()) as { data?: PageWithIG[] };
+              for (const page of data.data ?? []) {
+                if (!existingIds.has(page.id)) {
+                  allPages.push(page);
+                  existingIds.add(page.id);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — business_management might not be granted
+    }
+
+    // Filter to pages that have an Instagram Business Account linked
+    const igAccounts = allPages
+      .filter((p) => p.instagram_business_account != null)
+      .map((p) => ({
+        igId: p.instagram_business_account!.id,
+        username: p.instagram_business_account!.username,
+        name: p.instagram_business_account!.name,
+        profilePictureUrl: p.instagram_business_account!.profile_picture_url,
+        followersCount: p.instagram_business_account!.followers_count,
+        pageId: p.id,
+        pageName: p.name,
+        pageAccessToken: p.access_token,
+      }));
+
+    console.log("[InstagramConnector] Total IG accounts found:", igAccounts.length, igAccounts.map(a => a.username));
+
+    return igAccounts;
   }
 }

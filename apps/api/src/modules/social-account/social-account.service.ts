@@ -10,12 +10,47 @@ import { randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { EncryptionService } from "./services/encryption.service";
 import { PlatformRegistryService } from "./services/platform-registry.service";
+import { FacebookConnector } from "./connectors/facebook.connector";
+import { InstagramConnector } from "./connectors/instagram.connector";
 import { OAuthConfigService, PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
 
 export interface OAuthInitiation {
   authUrl: string;
   state: string;
+}
+
+export interface FacebookPageInfo {
+  id: string;
+  name: string;
+  accessToken: string;
+  pictureUrl?: string;
+  followersCount?: number;
+  category?: string;
+}
+
+type FacebookPage = Omit<FacebookPageInfo, "accessToken"> & { accessToken?: string };
+
+export interface FacebookCallbackResult {
+  type: "single" | "multiple" | "none";
+  account?: SocialAccountPublic;
+  pages?: FacebookPageInfo[];
+  agencyId: string;
+}
+
+export interface InstagramAccountInfo {
+  igId: string;
+  username?: string;
+  name?: string;
+  profilePictureUrl?: string;
+  followersCount?: number;
+  pageAccessToken: string;
+}
+
+export interface InstagramCallbackResult {
+  type: "multiple" | "none";
+  accounts?: InstagramAccountInfo[];
+  agencyId: string;
 }
 
 export interface AccountHealthStatus {
@@ -40,6 +75,8 @@ export type SocialAccountPublic = Omit<
 @Injectable()
 export class SocialAccountService {
   private readonly logger = new Logger(SocialAccountService.name);
+  private readonly fbPagesCache = new Map<string, { pages: FacebookPageInfo[]; expiresAt: number }>();
+  private readonly igAccountsCache = new Map<string, { accounts: InstagramAccountInfo[]; expiresAt: number }>();
 
   /**
    * API URL used to build platform OAuth callback URIs.
@@ -152,7 +189,18 @@ export class SocialAccountService {
     code: string,
     state: string,
   ): Promise<SocialAccountPublic> {
-    const { agencyId } = this.decodeState(state);
+    // Twitter PKCE: state is "base64url(json):codeVerifier" — split before decoding
+    let effectiveState = state;
+    let codeVerifier = "";
+    if (platform === SocialPlatform.TWITTER) {
+      const lastColon = state.lastIndexOf(":");
+      if (lastColon > 0) {
+        effectiveState = state.slice(0, lastColon);
+        codeVerifier = state.slice(lastColon + 1);
+      }
+    }
+
+    const { agencyId } = this.decodeState(effectiveState);
 
     const credentials = await this.oauthConfigService.getCredentials(platform);
 
@@ -166,15 +214,24 @@ export class SocialAccountService {
     const connector = this.platformRegistry.getConnector(platform);
     const redirectUri = this.buildRedirectUri(platform);
 
-    // For Twitter PKCE the state contains the verifier appended as :verifier
-    // The connector handles extraction internally; pass full code through
-    const tokens = await connector.exchangeCode(code, redirectUri, credentials);
+    // For Twitter PKCE: pass code as "code:verifier" so connector can extract both
+    const effectiveCode = codeVerifier ? `${code}:${codeVerifier}` : code;
+    const tokens = await connector.exchangeCode(effectiveCode, redirectUri, credentials);
     const profile = await connector.getUserProfile(tokens.accessToken);
 
     const encryptedAccessToken = this.encryption.encrypt(tokens.accessToken);
     const encryptedRefreshToken = tokens.refreshToken
       ? this.encryption.encrypt(tokens.refreshToken)
       : null;
+
+    // Extract extra metadata from profile (Twitter provides public_metrics)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const profileAny = profile as any;
+    const metadata: Record<string, string | number | boolean> = {};
+    if (profileAny.followersCount != null) metadata.followersCount = profileAny.followersCount as number;
+    if (profileAny.followingCount != null) metadata.followingCount = profileAny.followingCount as number;
+    if (profileAny.tweetCount != null) metadata.postsCount = profileAny.tweetCount as number;
+    if (profileAny.description != null) metadata.bio = profileAny.description as string;
 
     const account = await this.prisma.socialAccount.upsert({
       where: {
@@ -194,6 +251,7 @@ export class SocialAccountService {
         avatarUrl: profile.avatarUrl ?? null,
         isActive: true,
         lastSyncedAt: new Date(),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       },
       create: {
         agencyId,
@@ -209,6 +267,7 @@ export class SocialAccountService {
         isActive: true,
         connectedAt: new Date(),
         lastSyncedAt: new Date(),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       },
     });
 
@@ -217,6 +276,274 @@ export class SocialAccountService {
     );
 
     return this.stripTokens(account);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Facebook Page selection flow
+  // ---------------------------------------------------------------------------
+
+  async handleFacebookCallback(
+    code: string,
+    state: string,
+  ): Promise<FacebookCallbackResult> {
+    const { agencyId } = this.decodeState(state);
+
+    const credentials = await this.oauthConfigService.getCredentials(
+      SocialPlatform.FACEBOOK,
+    );
+
+    if (!credentials) {
+      throw new BadRequestException(
+        "No OAuth credentials are configured for FACEBOOK. " +
+          "Platform credentials may have been removed since the OAuth flow was initiated.",
+      );
+    }
+
+    const connector = this.platformRegistry.getConnector(
+      SocialPlatform.FACEBOOK,
+    ) as FacebookConnector;
+    const redirectUri = this.buildRedirectUri(SocialPlatform.FACEBOOK);
+
+    const tokens = await connector.exchangeCode(code, redirectUri, credentials);
+
+    // Try short-lived token first (preserves all page permissions from OAuth dialog),
+    // fall back to long-lived token
+    const shortToken = connector.getLastShortLivedToken();
+    let pages = await connector.getPages(shortToken ?? tokens.accessToken);
+
+    // If short-lived returned fewer pages, also try with long-lived and merge
+    if (shortToken) {
+      const longPages = await connector.getPages(tokens.accessToken);
+      const existingIds = new Set(pages.map((p) => p.id));
+      for (const p of longPages) {
+        if (!existingIds.has(p.id)) {
+          pages.push(p);
+        }
+      }
+    }
+
+    this.logger.log(`Facebook pages total: ${pages.length} — ${pages.map((p) => p.name).join(", ")}`);
+
+    if (pages.length === 0) {
+      return { type: "none", agencyId };
+    }
+
+    // Store pages with tokens in memory cache (keyed by agencyId, expires in 10 min)
+    // Always show selection modal — even with 1 page, let user confirm
+    const cacheKey = `fb_pages_${agencyId}`;
+    this.fbPagesCache.set(cacheKey, {
+      pages,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+
+    // Return pages WITHOUT access tokens (tokens stay server-side)
+    const safePagesForClient = pages.map(({ accessToken: _tok, ...rest }) => ({
+      ...rest,
+      accessToken: "", // omitted for security — resolved from cache on select
+    }));
+    return { type: "multiple", pages: safePagesForClient, agencyId };
+  }
+
+  async connectFacebookPage(
+    agencyId: string,
+    page: {
+      pageId: string;
+      pageName: string;
+      pageAccessToken?: string;
+      pictureUrl?: string;
+      followersCount?: number;
+      category?: string;
+    },
+  ): Promise<SocialAccountPublic> {
+    // Resolve page access token: use provided or look up from cache
+    let pageAccessToken = page.pageAccessToken;
+    if (!pageAccessToken) {
+      const cacheKey = `fb_pages_${agencyId}`;
+      const cached = this.fbPagesCache.get(cacheKey);
+      if (!cached || cached.expiresAt < Date.now()) {
+        this.fbPagesCache.delete(cacheKey);
+        throw new BadRequestException("Facebook page selection expired. Please reconnect.");
+      }
+      const cachedPage = cached.pages.find((p) => p.id === page.pageId);
+      if (!cachedPage) {
+        throw new BadRequestException("Selected page not found. Please reconnect.");
+      }
+      pageAccessToken = cachedPage.accessToken;
+    }
+
+    const encryptedAccessToken = this.encryption.encrypt(pageAccessToken);
+
+    const account = await this.prisma.socialAccount.upsert({
+      where: {
+        agencyId_platform_platformUserId: {
+          agencyId,
+          platform: SocialPlatform.FACEBOOK,
+          platformUserId: page.pageId,
+        },
+      },
+      update: {
+        accessToken: encryptedAccessToken,
+        displayName: page.pageName,
+        platformUsername: page.pageName,
+        avatarUrl: page.pictureUrl ?? null,
+        isActive: true,
+        lastSyncedAt: new Date(),
+        metadata: {
+          followersCount: page.followersCount ?? 0,
+          category: page.category ?? "",
+          type: "page",
+        },
+      },
+      create: {
+        agencyId,
+        platform: SocialPlatform.FACEBOOK,
+        platformUserId: page.pageId,
+        platformUsername: page.pageName,
+        displayName: page.pageName,
+        avatarUrl: page.pictureUrl ?? null,
+        accessToken: encryptedAccessToken,
+        isActive: true,
+        connectedAt: new Date(),
+        lastSyncedAt: new Date(),
+        metadata: {
+          followersCount: page.followersCount ?? 0,
+          category: page.category ?? "",
+          type: "page",
+        },
+      },
+    });
+
+    this.logger.log(
+      `Facebook page connected: pageId=${page.pageId} name=${page.pageName} agencyId=${agencyId}`,
+    );
+
+    return this.stripTokens(account);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Instagram account selection flow
+  // ---------------------------------------------------------------------------
+
+  async handleInstagramCallback(
+    code: string,
+    state: string,
+  ): Promise<InstagramCallbackResult> {
+    const { agencyId } = this.decodeState(state);
+
+    const credentials = await this.oauthConfigService.getCredentials(
+      SocialPlatform.INSTAGRAM,
+    );
+
+    if (!credentials) {
+      throw new BadRequestException(
+        "No OAuth credentials are configured for INSTAGRAM.",
+      );
+    }
+
+    const connector = this.platformRegistry.getConnector(
+      SocialPlatform.INSTAGRAM,
+    ) as InstagramConnector;
+    const redirectUri = this.buildRedirectUri(SocialPlatform.INSTAGRAM);
+
+    const tokens = await connector.exchangeCode(code, redirectUri, credentials);
+    const igAccounts = await connector.getInstagramAccounts(tokens.accessToken);
+
+    this.logger.log(`Instagram accounts total: ${igAccounts.length} — ${igAccounts.map((a) => a.username).join(", ")}`);
+
+    if (igAccounts.length === 0) {
+      return { type: "none", agencyId };
+    }
+
+    // Store accounts with tokens in cache
+    const cacheKey = `ig_accounts_${agencyId}`;
+    const accountsWithTokens = igAccounts.map((a) => ({
+      igId: a.igId,
+      username: a.username,
+      name: a.name,
+      profilePictureUrl: a.profilePictureUrl,
+      followersCount: a.followersCount,
+      pageAccessToken: a.pageAccessToken,
+    }));
+    this.igAccountsCache.set(cacheKey, {
+      accounts: accountsWithTokens,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+
+    // Return WITHOUT tokens
+    const safeForClient = accountsWithTokens.map(({ pageAccessToken: _tok, ...rest }) => ({
+      ...rest,
+      pageAccessToken: "",
+    }));
+    return { type: "multiple", accounts: safeForClient, agencyId };
+  }
+
+  async connectInstagramAccount(
+    agencyId: string,
+    account: {
+      igId: string;
+      username?: string;
+      name?: string;
+      profilePictureUrl?: string;
+      followersCount?: number;
+    },
+  ): Promise<SocialAccountPublic> {
+    // Get token from cache
+    const cacheKey = `ig_accounts_${agencyId}`;
+    const cached = this.igAccountsCache.get(cacheKey);
+    if (!cached || cached.expiresAt < Date.now()) {
+      this.igAccountsCache.delete(cacheKey);
+      throw new BadRequestException("Instagram account selection expired. Please reconnect.");
+    }
+    const cachedAccount = cached.accounts.find((a) => a.igId === account.igId);
+    if (!cachedAccount) {
+      throw new BadRequestException("Selected account not found. Please reconnect.");
+    }
+
+    const encryptedAccessToken = this.encryption.encrypt(cachedAccount.pageAccessToken);
+
+    const saved = await this.prisma.socialAccount.upsert({
+      where: {
+        agencyId_platform_platformUserId: {
+          agencyId,
+          platform: SocialPlatform.INSTAGRAM,
+          platformUserId: account.igId,
+        },
+      },
+      update: {
+        accessToken: encryptedAccessToken,
+        displayName: account.name ?? account.username ?? null,
+        platformUsername: account.username ?? null,
+        avatarUrl: account.profilePictureUrl ?? null,
+        isActive: true,
+        lastSyncedAt: new Date(),
+        metadata: {
+          followersCount: account.followersCount ?? 0,
+          type: "business",
+        },
+      },
+      create: {
+        agencyId,
+        platform: SocialPlatform.INSTAGRAM,
+        platformUserId: account.igId,
+        platformUsername: account.username ?? null,
+        displayName: account.name ?? account.username ?? null,
+        avatarUrl: account.profilePictureUrl ?? null,
+        accessToken: encryptedAccessToken,
+        isActive: true,
+        connectedAt: new Date(),
+        lastSyncedAt: new Date(),
+        metadata: {
+          followersCount: account.followersCount ?? 0,
+          type: "business",
+        },
+      },
+    });
+
+    this.logger.log(
+      `Instagram account connected: igId=${account.igId} username=${account.username} agencyId=${agencyId}`,
+    );
+
+    return this.stripTokens(saved);
   }
 
   // ---------------------------------------------------------------------------
@@ -515,6 +842,26 @@ export class SocialAccountService {
           const data = (await response.json()) as { data?: any[] };
           posts = data.data ?? [];
           this.logger.log(`Instagram API returned ${posts.length} media items for account ${accountId}`);
+          // Fetch comments for each post
+          for (const post of posts) {
+            try {
+              const commResp = await fetch(
+                `https://graph.facebook.com/v22.0/${post.id}/comments?fields=id,text,username,timestamp&limit=10&access_token=${accessToken}`,
+              );
+              if (commResp.ok) {
+                const commData = (await commResp.json()) as { data?: Array<{ id: string; text: string; username?: string; timestamp: string }> };
+                post._commentsList = (commData.data ?? []).map((c: { id: string; text: string; username?: string; timestamp: string }) => ({
+                  id: c.id,
+                  message: c.text,
+                  from: { name: c.username ?? "User" },
+                  created_time: c.timestamp,
+                }));
+                post.comments_count = commData.data?.length ?? post.comments_count ?? 0;
+              }
+            } catch {
+              // Non-fatal
+            }
+          }
         } else {
           const text = await response.text();
           this.logger.warn(
@@ -523,21 +870,190 @@ export class SocialAccountService {
           return { synced: 0, message: `Instagram API error: ${response.status}` };
         }
       } else if (platform === SocialPlatform.FACEBOOK) {
+        const pageId = account.platformUserId;
+        this.logger.log(`Facebook sync: pageId=${pageId}`);
+
+        // Multiple strategies — all include engagement fields where possible
+        const engagementFields = "id,message,created_time,full_picture,reactions.summary(true),comments.summary(true)";
+        const basicFields = "id,message,created_time,full_picture";
+        const strategies = [
+          {
+            label: "posts-query-engagement",
+            url: `https://graph.facebook.com/v22.0/${pageId}/posts?fields=${engagementFields}&limit=25&access_token=${accessToken}`,
+            useHeader: false,
+          },
+          {
+            label: "posts-header-engagement",
+            url: `https://graph.facebook.com/v22.0/${pageId}/posts?fields=${engagementFields}&limit=25`,
+            useHeader: true,
+          },
+          {
+            label: "posts-query-basic",
+            url: `https://graph.facebook.com/v22.0/${pageId}/posts?fields=${basicFields}&limit=25&access_token=${accessToken}`,
+            useHeader: false,
+          },
+          {
+            label: "field-expansion",
+            url: `https://graph.facebook.com/v22.0/${pageId}?fields=posts.limit(25){${basicFields}}&access_token=${accessToken}`,
+            useHeader: false,
+          },
+        ];
+
+        let fbPosts: any[] = [];
+        for (const strategy of strategies) {
+          this.logger.log(`Facebook sync strategy [${strategy.label}]`);
+          const headers: Record<string, string> = {};
+          if (strategy.useHeader) {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+          }
+          const resp = await fetch(strategy.url, { headers });
+          if (resp.ok) {
+            const data = await resp.json();
+            // field-expansion returns {posts: {data: [...]}}
+            fbPosts = data.posts?.data ?? data.data ?? [];
+            this.logger.log(`Facebook sync [${strategy.label}] SUCCESS: ${fbPosts.length} posts`);
+            break;
+          } else {
+            const errText = await resp.text();
+            this.logger.warn(`Facebook sync [${strategy.label}] failed: ${resp.status} ${errText.substring(0, 200)}`);
+          }
+        }
+        // Fetch engagement + comments per post (requires pages_read_engagement Advanced Access)
+        for (const post of fbPosts) {
+          if (post.reactions?.summary || post.like_count != null) continue;
+          try {
+            const engResp = await fetch(
+              `https://graph.facebook.com/v22.0/${post.id}?fields=reactions.summary(true),comments.limit(10){id,message,from,created_time}&access_token=${accessToken}`,
+            );
+            if (engResp.ok) {
+              const engData = (await engResp.json()) as {
+                reactions?: { summary?: { total_count?: number } };
+                comments?: { data?: Array<{ id: string; message: string; from?: { name: string; id: string }; created_time: string }> };
+              };
+              post.like_count = engData.reactions?.summary?.total_count ?? 0;
+              post.comments_count = engData.comments?.data?.length ?? 0;
+              post._commentsList = engData.comments?.data ?? [];
+            }
+          } catch {
+            // Non-fatal — engagement requires Advanced Access
+          }
+        }
+
+        posts = fbPosts;
+        if (posts.length === 0) {
+          this.logger.warn(`Facebook sync: all strategies failed for account ${accountId}`);
+        }
+      } else if (platform === SocialPlatform.TWITTER) {
         const url =
-          `https://graph.facebook.com/v22.0/${account.platformUserId}/posts` +
-          `?fields=id,message,created_time,full_picture` +
-          `&limit=25&access_token=${accessToken}`;
-        const response = await fetch(url);
+          `https://api.twitter.com/2/users/${account.platformUserId}/tweets` +
+          `?max_results=20&exclude=retweets,replies` +
+          `&tweet.fields=created_at,public_metrics,attachments` +
+          `&expansions=attachments.media_keys&media.fields=url,preview_image_url,type`;
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
         if (response.ok) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const data = (await response.json()) as { data?: any[] };
-          posts = data.data ?? [];
+          const data = (await response.json()) as { data?: any[]; includes?: { media?: any[] } };
+          const mediaMap = new Map<string, { url?: string; preview_image_url?: string; type?: string }>();
+          for (const m of data.includes?.media ?? []) {
+            mediaMap.set(m.media_key, m);
+          }
+          posts = (data.data ?? []).map((t: any) => {
+            const mediaKey = t.attachments?.media_keys?.[0];
+            const media = mediaKey ? mediaMap.get(mediaKey) : undefined;
+            return {
+              id: t.id,
+              caption: t.text,
+              timestamp: t.created_at,
+              like_count: t.public_metrics?.like_count,
+              comments_count: t.public_metrics?.reply_count,
+              media_url: media?.url ?? media?.preview_image_url ?? null,
+              media_type: media?.type === "video" ? "VIDEO" : "IMAGE",
+            };
+          });
+          this.logger.log(`Twitter API returned ${posts.length} tweets for account ${accountId}`);
         } else {
           const text = await response.text();
-          this.logger.warn(
-            `Facebook posts fetch failed for account ${accountId}: ${response.status} ${text}`,
-          );
-          return { synced: 0, message: `Facebook API returned ${response.status}` };
+          this.logger.warn(`Twitter posts fetch failed for account ${accountId}: ${response.status} ${text}`);
+          return { synced: 0, message: `Twitter API error: ${response.status}` };
+        }
+      } else if (platform === SocialPlatform.LINKEDIN) {
+        const personUrn = `urn:li:person:${account.platformUserId}`;
+        const strategies = [
+          {
+            label: "ugcPosts",
+            url: `https://api.linkedin.com/v2/ugcPosts?q=authors&authors=List(${encodeURIComponent(personUrn)})&count=25`,
+            headers: { Authorization: `Bearer ${accessToken}` },
+          },
+          {
+            label: "shares",
+            url: `https://api.linkedin.com/v2/shares?q=owners&owners=${encodeURIComponent(personUrn)}&count=25`,
+            headers: { Authorization: `Bearer ${accessToken}` },
+          },
+          {
+            label: "rest-posts-v202401",
+            url: `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(personUrn)}&q=author&count=25`,
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "LinkedIn-Version": "202401",
+              "X-Restli-Protocol-Version": "2.0.0",
+            },
+          },
+          {
+            label: "rest-posts-v202605",
+            url: `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(personUrn)}&q=author&count=25`,
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "LinkedIn-Version": "202605",
+              "X-Restli-Protocol-Version": "2.0.0",
+            },
+          },
+        ];
+
+        for (const strategy of strategies) {
+          this.logger.log(`LinkedIn sync strategy [${strategy.label}]`);
+          try {
+            const resp = await fetch(strategy.url, { headers: strategy.headers });
+            if (resp.ok) {
+              const data = await resp.json();
+              const elements = (data as any).elements ?? (data as any).results ?? [];
+              this.logger.log(`LinkedIn sync [${strategy.label}] SUCCESS: ${elements.length} posts`);
+
+              posts = elements.map((el: any) => {
+                // ugcPosts format
+                const ugcText = el.specificContent?.["com.linkedin.ugc.ShareContent"]?.shareCommentary?.text;
+                // shares format
+                const shareText = el.text?.text;
+                // rest/posts format
+                const restText = el.commentary;
+
+                const caption = ugcText ?? shareText ?? restText ?? "";
+                const createdAt = el.created?.time ?? el.createdAt ?? el.publishedAt;
+                const timestamp = createdAt
+                  ? new Date(typeof createdAt === "number" ? createdAt : createdAt).toISOString()
+                  : undefined;
+
+                return {
+                  id: el.id ?? el.urn ?? el.activity,
+                  caption,
+                  timestamp,
+                  media_url: null,
+                  media_type: "IMAGE",
+                };
+              });
+              break;
+            } else {
+              const errText = await resp.text();
+              this.logger.warn(`LinkedIn sync [${strategy.label}] failed: ${resp.status} ${errText.substring(0, 200)}`);
+            }
+          } catch (err) {
+            this.logger.warn(`LinkedIn sync [${strategy.label}] error: ${String(err)}`);
+          }
+        }
+
+        if (posts.length === 0) {
+          this.logger.log(`LinkedIn: all post fetch strategies failed for account ${accountId}`);
         }
       } else {
         return { synced: 0, message: `Sync not yet supported for ${platform}` };
@@ -564,11 +1080,21 @@ export class SocialAccountService {
       const platformPostId = (p.id as string | undefined) ?? null;
       if (!platformPostId) continue;
 
-      // Skip posts already synced for this social account
+      // Check if post already synced — update metrics if so
       const existing = await this.prisma.postTarget.findFirst({
         where: { platformPostId, socialAccountId: accountId },
       });
-      if (existing) continue;
+      if (existing) {
+        // Update metrics on existing post
+        const likes = (p.like_count as number | undefined) ?? (p.likes?.summary?.total_count as number | undefined) ?? (p.reactions?.summary?.total_count as number | undefined) ?? 0;
+        const comments = (p.comments_count as number | undefined) ?? (p.comments?.summary?.total_count as number | undefined) ?? 0;
+        const commentsList = (p._commentsList as Array<{ id: string; message: string; from?: { name: string }; created_time: string }> | undefined) ?? [];
+        await this.prisma.postTarget.update({
+          where: { id: existing.id },
+          data: { platformSpecificContent: { likes, comments, commentsList } },
+        });
+        continue;
+      }
 
       const captionText: string =
         ((p.caption as string | undefined) ?? (p.message as string | undefined) ?? "").slice(0, 2000);
@@ -604,6 +1130,11 @@ export class SocialAccountService {
                 platformPostId,
                 status: "PUBLISHED",
                 publishedAt,
+                platformSpecificContent: {
+                  likes: (p.like_count as number | undefined) ?? (p.likes?.summary?.total_count as number | undefined) ?? (p.reactions?.summary?.total_count as number | undefined) ?? 0,
+                  comments: (p.comments_count as number | undefined) ?? (p.comments?.summary?.total_count as number | undefined) ?? 0,
+                  commentsList: (p._commentsList as Array<{ id: string; message: string; from?: { name: string }; created_time: string }> | undefined) ?? [],
+                },
               },
             },
             ...(mediaUrl ? {
@@ -625,6 +1156,169 @@ export class SocialAccountService {
         this.logger.warn(
           `Failed to create post for platformPostId=${platformPostId}: ${String(err)}`,
         );
+      }
+    }
+
+    // Fetch profile stats (followers, following, posts count) for Instagram
+    if (platform === SocialPlatform.INSTAGRAM) {
+      try {
+        const igUserId = (await this.prisma.socialAccount.findUnique({ where: { id: accountId } }))?.platformUserId;
+        if (igUserId) {
+          const profileUrl =
+            `https://graph.facebook.com/v22.0/${igUserId}` +
+            `?fields=followers_count,follows_count,media_count,biography,website` +
+            `&access_token=${accessToken}`;
+          const profileResp = await fetch(profileUrl);
+          if (profileResp.ok) {
+            const profileData = (await profileResp.json()) as {
+              followers_count?: number;
+              follows_count?: number;
+              media_count?: number;
+              biography?: string;
+              website?: string;
+            };
+            const existingMeta = (typeof account.metadata === "object" && account.metadata !== null) ? account.metadata as Record<string, unknown> : {};
+            await this.prisma.socialAccount.update({
+              where: { id: accountId },
+              data: {
+                metadata: {
+                  ...existingMeta,
+                  followersCount: profileData.followers_count ?? 0,
+                  followingCount: profileData.follows_count ?? 0,
+                  postsCount: profileData.media_count ?? 0,
+                  bio: profileData.biography ?? "",
+                  website: profileData.website ?? "",
+                },
+              },
+            });
+            this.logger.log(
+              `Instagram profile stats updated: followers=${profileData.followers_count} following=${profileData.follows_count} posts=${profileData.media_count}`,
+            );
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch Instagram profile stats: ${String(err)}`);
+      }
+    }
+
+    // Fetch profile stats for Facebook pages (use Authorization header)
+    if (platform === SocialPlatform.FACEBOOK) {
+      try {
+        const fbUrl =
+          `https://graph.facebook.com/v22.0/${account.platformUserId}` +
+          `?fields=followers_count,fan_count,name,category`;
+        const fbResp = await fetch(fbUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (fbResp.ok) {
+          const fbData = (await fbResp.json()) as {
+            followers_count?: number;
+            fan_count?: number;
+            category?: string;
+          };
+          const existingMeta = (typeof account.metadata === "object" && account.metadata !== null) ? account.metadata as Record<string, unknown> : {};
+          await this.prisma.socialAccount.update({
+            where: { id: accountId },
+            data: {
+              metadata: {
+                ...existingMeta,
+                followersCount: fbData.followers_count ?? fbData.fan_count ?? 0,
+                postsCount: posts?.length ?? 0,
+                category: fbData.category ?? "",
+              },
+            },
+          });
+          this.logger.log(`Facebook profile stats updated: followers=${fbData.followers_count ?? fbData.fan_count}`);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch Facebook profile stats: ${String(err)}`);
+      }
+    }
+
+    // Fetch profile stats for Twitter
+    if (platform === SocialPlatform.TWITTER) {
+      try {
+        const twResp = await fetch(
+          `https://api.twitter.com/2/users/${account.platformUserId}?user.fields=public_metrics,description`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (twResp.ok) {
+          const twData = (await twResp.json()) as {
+            data?: {
+              public_metrics?: { followers_count?: number; following_count?: number; tweet_count?: number };
+              description?: string;
+            };
+          };
+          const metrics = twData.data?.public_metrics;
+          const existingMeta = (typeof account.metadata === "object" && account.metadata !== null) ? account.metadata as Record<string, unknown> : {};
+          await this.prisma.socialAccount.update({
+            where: { id: accountId },
+            data: {
+              metadata: {
+                ...existingMeta,
+                followersCount: metrics?.followers_count ?? 0,
+                followingCount: metrics?.following_count ?? 0,
+                postsCount: metrics?.tweet_count ?? 0,
+                bio: twData.data?.description ?? "",
+              },
+            },
+          });
+          this.logger.log(`Twitter profile stats updated: followers=${metrics?.followers_count} following=${metrics?.following_count}`);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch Twitter profile stats: ${String(err)}`);
+      }
+    }
+
+    // Update LinkedIn profile stats
+    if (platform === SocialPlatform.LINKEDIN) {
+      try {
+        const liProfileResp = await fetch("https://api.linkedin.com/v2/userinfo", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (liProfileResp.ok) {
+          const liProfile = (await liProfileResp.json()) as {
+            name?: string;
+            picture?: string;
+            email?: string;
+          };
+          const existingMeta = (typeof account.metadata === "object" && account.metadata !== null) ? account.metadata as Record<string, unknown> : {};
+
+          // Try to fetch connection count
+          let connectionsCount = 0;
+          try {
+            const connResp = await fetch(
+              "https://api.linkedin.com/v2/connections?q=viewer&start=0&count=0",
+              { headers: { Authorization: `Bearer ${accessToken}` } },
+            );
+            if (connResp.ok) {
+              const connData = (await connResp.json()) as { _total?: number; paging?: { total?: number } };
+              connectionsCount = connData._total ?? connData.paging?.total ?? 0;
+              this.logger.log(`LinkedIn connections count: ${connectionsCount}`);
+            } else {
+              this.logger.warn(`LinkedIn connections fetch failed: ${connResp.status}`);
+            }
+          } catch (err) {
+            this.logger.warn(`LinkedIn connections fetch error: ${String(err)}`);
+          }
+
+          await this.prisma.socialAccount.update({
+            where: { id: accountId },
+            data: {
+              displayName: liProfile.name ?? account.displayName,
+              avatarUrl: liProfile.picture ?? account.avatarUrl,
+              metadata: {
+                ...existingMeta,
+                email: liProfile.email ?? "",
+                postsCount: posts.length,
+                ...(connectionsCount > 0 ? { followersCount: connectionsCount, connectionsCount } : {}),
+              },
+            },
+          });
+          this.logger.log(`LinkedIn profile updated: name=${liProfile.name} connections=${connectionsCount}`);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch LinkedIn profile: ${String(err)}`);
       }
     }
 
