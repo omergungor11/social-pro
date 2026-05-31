@@ -428,6 +428,18 @@ export default function NewPostPage(): React.JSX.Element {
       socialAccountId,
     }));
 
+    // Attach uploaded media (only files that finished uploading to storage).
+    const media = uploadedFiles
+      .filter((f) => f.url && !f.error)
+      .map((f) => ({
+        url: f.url as string,
+        mediaType: f.mediaType ?? 'IMAGE',
+        ...(f.storageKey ? { storageKey: f.storageKey } : {}),
+      }));
+    if (media.length > 0) {
+      payload['media'] = media;
+    }
+
     return payload;
   }
 

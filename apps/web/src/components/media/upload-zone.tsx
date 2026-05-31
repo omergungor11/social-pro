@@ -14,6 +14,12 @@ export interface UploadedFile {
   preview: string | null;
   progress: number;
   error: string | null;
+  /** Public URL returned by the server after a successful upload. */
+  url: string | null;
+  /** S3 storage key returned by the server. */
+  storageKey: string | null;
+  /** Resolved media type for the post payload. */
+  mediaType: 'IMAGE' | 'VIDEO' | null;
 }
 
 export interface UploadZoneProps {
@@ -170,19 +176,74 @@ export function UploadZone({
     onFilesChange(files);
   }, [files, onFilesChange]);
 
-  // Simulate upload progress for a file
-  function simulateUpload(id: string): void {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 20) + 10;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-      }
+  // Upload a file to the media endpoint, tracking real progress via XHR.
+  function uploadFile(id: string, file: File): void {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!apiUrl) {
       setFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, progress } : f))
+        prev.map((f) => (f.id === id ? { ...f, error: 'API URL not configured', progress: 100 } : f))
       );
-    }, 150);
+      return;
+    }
+    const token =
+      typeof window !== 'undefined' ? window.localStorage.getItem('sp_access_token') : null;
+
+    const form = new FormData();
+    form.append('file', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${apiUrl}/media/upload`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e): void => {
+      if (e.lengthComputable) {
+        const progress = Math.min(99, Math.round((e.loaded / e.total) * 100));
+        setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, progress } : f)));
+      }
+    };
+
+    xhr.onload = (): void => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const body = JSON.parse(xhr.responseText) as Record<string, unknown>;
+          const data = (body['data'] ?? body) as {
+            url?: string;
+            storageKey?: string;
+            type?: string;
+          };
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === id
+                ? {
+                    ...f,
+                    progress: 100,
+                    error: null,
+                    url: data.url ?? null,
+                    storageKey: data.storageKey ?? null,
+                    mediaType: (data.type === 'VIDEO' ? 'VIDEO' : 'IMAGE') as 'IMAGE' | 'VIDEO',
+                  }
+                : f
+            )
+          );
+        } catch {
+          setFiles((prev) =>
+            prev.map((f) => (f.id === id ? { ...f, error: 'Invalid upload response', progress: 100 } : f))
+          );
+        }
+      } else {
+        setFiles((prev) =>
+          prev.map((f) => (f.id === id ? { ...f, error: `Upload failed (${xhr.status})`, progress: 100 } : f))
+        );
+      }
+    };
+
+    xhr.onerror = (): void => {
+      setFiles((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, error: 'Upload failed — network error', progress: 100 } : f))
+      );
+    };
+
+    xhr.send(form);
   }
 
   function validateFile(file: File): string | null {
@@ -217,6 +278,9 @@ export function UploadZone({
         preview,
         progress: error !== null ? 100 : 0,
         error,
+        url: null,
+        storageKey: null,
+        mediaType: null,
       };
     });
 
@@ -225,10 +289,10 @@ export function UploadZone({
       return next;
     });
 
-    // Kick off simulated upload for valid files
+    // Kick off the real upload for valid files
     newEntries.forEach((entry) => {
       if (entry.error === null) {
-        simulateUpload(entry.id);
+        uploadFile(entry.id, entry.file);
       }
     });
   }
