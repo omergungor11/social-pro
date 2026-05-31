@@ -1,0 +1,101 @@
+# Render Blueprint — free hosting for Social Pro
+# Deploys the NestJS API and the Next.js web app as two free web services.
+# DB = Neon (external), Redis = Upstash (external), storage = Cloudflare R2 (external).
+#
+# Secrets marked `sync: false` must be filled in the Render dashboard after the
+# blueprint is created. JWT/ENCRYPTION keys are auto-generated and persisted.
+services:
+  # ───────────────────────── API (NestJS) ─────────────────────────
+  - type: web
+    name: social-pro-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @social-pro/shared-types build &&
+      pnpm --filter @social-pro/prisma exec prisma generate &&
+      pnpm --filter @social-pro/api build
+    startCommand: >-
+      pnpm --filter @social-pro/prisma exec prisma migrate deploy &&
+      node apps/api/dist/main.js
+    healthCheckPath: /api/v1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Database (Neon) — pooled connection string
+      - key: DATABASE_URL
+        sync: false
+      # Redis (Upstash) — TCP endpoint
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        value: "6379"
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_TLS
+        value: "true"
+      # Auth / crypto — generated once and kept stable across deploys
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      # CORS — set to the web service URL once it exists
+      - key: CORS_ORIGIN
+        sync: false
+      # Object storage (Cloudflare R2 — S3 compatible). Required for boot.
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: social-pro-uploads
+      - key: S3_REGION
+        value: auto
+      # ─── Optional integrations (add as needed) ───
+      - key: FACEBOOK_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_CLIENT_SECRET
+        sync: false
+      - key: INSTAGRAM_CLIENT_ID
+        sync: false
+      - key: INSTAGRAM_CLIENT_SECRET
+        sync: false
+      - key: TWITTER_CLIENT_ID
+        sync: false
+      - key: TWITTER_CLIENT_SECRET
+        sync: false
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+  # ───────────────────────── Web (Next.js) ─────────────────────────
+  - type: web
+    name: social-pro-web
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @social-pro/web build
+    startCommand: pnpm --filter @social-pro/web exec next start -p $PORT
+    envVars:
+      # Public API base URL — set to the API service URL + /api/v1
+      # e.g. https://social-pro-api.onrender.com/api/v1
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
