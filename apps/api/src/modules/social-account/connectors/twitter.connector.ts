@@ -23,6 +23,7 @@ export class TwitterConnector implements OAuthConnector {
     "tweet.read",
     "tweet.write",
     "users.read",
+    "media.write",
     "offline.access",
   ];
 
