@@ -12,7 +12,6 @@ services:
     plan: free
     region: frankfurt
     buildCommand: >-
-      corepack enable &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @social-pro/shared-types build &&
       pnpm --filter @social-pro/prisma exec prisma generate &&
@@ -90,8 +89,9 @@ services:
     plan: free
     region: frankfurt
     buildCommand: >-
-      corepack enable &&
       pnpm install --frozen-lockfile &&
+      pnpm --filter @social-pro/shared-types build &&
+      pnpm --filter @social-pro/prisma exec prisma generate &&
       pnpm --filter @social-pro/web build
     startCommand: pnpm --filter @social-pro/web exec next start -p $PORT
     envVars:
