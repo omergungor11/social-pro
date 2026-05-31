@@ -44,6 +44,11 @@ export class S3StorageService {
       region,
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
       credentials: { accessKeyId, secretAccessKey },
+      // Cloudflare R2 does not support the default CRC32 trailer checksums that
+      // AWS SDK v3 (>= 3.729) adds to every upload, which makes PutObject fail.
+      // Only compute/validate checksums when explicitly required.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
     });
   }
 
