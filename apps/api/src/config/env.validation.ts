@@ -28,6 +28,7 @@ const envSchema = z.object({
   S3_SECRET_KEY: z.string().min(1),
   S3_BUCKET: z.string().default('social-pro-media'),
   S3_REGION: z.string().default('us-east-1'),
+  S3_PUBLIC_URL: z.string().url().optional(),
 
   // Email (SMTP)
   SMTP_HOST: z.string().default('localhost'),

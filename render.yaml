@@ -56,6 +56,9 @@ services:
         value: social-pro-uploads
       - key: S3_REGION
         value: auto
+      # R2 public bucket URL (e.g. https://pub-xxxx.r2.dev) for serving media
+      - key: S3_PUBLIC_URL
+        sync: false
       # ─── Optional integrations (add as needed) ───
       - key: FACEBOOK_CLIENT_ID
         sync: false

@@ -124,6 +124,15 @@ export class S3StorageService {
    * @param key Object key inside the bucket
    */
   getPublicUrl(key: string): string {
+    // Explicit public base URL — required for Cloudflare R2, whose S3 API
+    // endpoint is NOT publicly readable. Set this to the bucket's public
+    // r2.dev URL or a custom domain (e.g. https://pub-xxxx.r2.dev). The key is
+    // appended directly since that base already maps to the bucket root.
+    const publicBase = process.env["S3_PUBLIC_URL"];
+    if (publicBase) {
+      return `${publicBase.replace(/\/$/, "")}/${key}`;
+    }
+
     const endpoint = this.endpoint;
     if (endpoint) {
       const base = endpoint.replace(/\/$/, "");
