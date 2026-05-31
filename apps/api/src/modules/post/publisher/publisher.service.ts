@@ -56,7 +56,7 @@ export class PublisherService {
     private readonly instagramPublisher: InstagramPublisher,
     private readonly linkedInPublisher: LinkedInPublisher
   ) {
-    this.adapters = new Map([
+    this.adapters = new Map<SocialPlatform, PlatformPublisher>([
       [SocialPlatform.TWITTER, this.twitterPublisher],
       [SocialPlatform.FACEBOOK, this.facebookPublisher],
       [SocialPlatform.INSTAGRAM, this.instagramPublisher],
@@ -127,6 +127,43 @@ export class PublisherService {
     );
 
     return targetResults;
+  }
+
+  /**
+   * Best-effort deletion of a post from every platform it was published to.
+   *
+   * Iterates the post's targets that have a `platformPostId` and asks each
+   * platform adapter to delete it. Failures are logged but never thrown — the
+   * caller (post deletion) must not be blocked by a remote API error.
+   */
+  async unpublishPost(post: PostWithRelations): Promise<void> {
+    const publishedTargets = post.targets.filter((t) => t.platformPostId);
+
+    for (const target of publishedTargets) {
+      const adapter = this.adapters.get(target.socialAccount.platform);
+      if (!adapter?.unpublish) {
+        this.logger.debug(
+          `Skipping platform deletion for ${target.socialAccount.platform} ` +
+            `(no unpublish support) target=${target.id}`
+        );
+        continue;
+      }
+
+      try {
+        const decrypted = this.decryptAccount(target.socialAccount);
+        await adapter.unpublish(target.platformPostId!, decrypted);
+        this.logger.log(
+          `Deleted from platform: platform=${target.socialAccount.platform} ` +
+            `platformPostId=${target.platformPostId}`
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Failed to delete from ${target.socialAccount.platform} ` +
+            `(platformPostId=${target.platformPostId}): ${message}`
+        );
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------

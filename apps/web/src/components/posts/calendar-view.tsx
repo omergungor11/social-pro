@@ -1,8 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Heart, MessageCircle, ImageIcon, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Dialog } from '@/components/ui/dialog';
+import { PlatformIcon } from '@/components/social/platform-icon';
 // ---------------------------------------------------------------------------
 // Shared Post types (kept here to avoid circular imports with the page)
 // ---------------------------------------------------------------------------
@@ -23,9 +25,11 @@ export interface Post {
   platforms: import('@/components/social/platform-icon').Platform[];
   status: PostStatus;
   scheduledAt: string | null;
+  publishedAt?: string | null;
   clientId: string;
   clientName: string;
   createdAt: string;
+  thumbnail?: string | null;
   metrics?: PostMetrics;
 }
 
@@ -39,7 +43,7 @@ export interface CalendarViewProps {
 }
 
 // ---------------------------------------------------------------------------
-// Status dot colors
+// Status config
 // ---------------------------------------------------------------------------
 
 const STATUS_DOT: Record<PostStatus, string> = {
@@ -50,112 +54,21 @@ const STATUS_DOT: Record<PostStatus, string> = {
   cancelled: 'bg-orange-500',
 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const STATUS_BAR: Record<PostStatus, string> = {
+  draft: 'bg-slate-400',
+  scheduled: 'bg-blue-500',
+  published: 'bg-emerald-500',
+  failed: 'bg-red-500',
+  cancelled: 'bg-orange-500',
+};
 
-function getDaysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-function getFirstDayOfMonth(year: number, month: number): number {
-  return new Date(year, month, 1).getDay();
-}
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-// ---------------------------------------------------------------------------
-// DayCell sub-component
-// ---------------------------------------------------------------------------
-
-interface DayCellProps {
-  day: number;
-  isToday: boolean;
-  isOtherMonth: boolean;
-  posts: Post[];
-  onDayClick: (day: number, posts: Post[]) => void;
-}
-
-function DayCell({ day, isToday, isOtherMonth, posts, onDayClick }: DayCellProps): React.JSX.Element {
-  const hasPosts = posts.length > 0;
-  const visibleDots = posts.slice(0, 3);
-  const overflow = posts.length - 3;
-
-  return (
-    <button
-      type="button"
-      onClick={() => hasPosts && onDayClick(day, posts)}
-      className={cn(
-        'relative flex min-h-[72px] w-full flex-col rounded-xl border p-2 text-left transition-colors',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1',
-        isOtherMonth
-          ? 'border-transparent bg-slate-50/40 cursor-default'
-          : hasPosts
-          ? 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40 cursor-pointer'
-          : 'border-slate-200 bg-white cursor-default'
-      )}
-      aria-label={`${isOtherMonth ? 'Other month' : 'Day'} ${day}${posts.length > 0 ? `, ${posts.length} post${posts.length !== 1 ? 's' : ''}` : ''}`}
-      disabled={!hasPosts}
-    >
-      {/* Day number */}
-      <span
-        className={cn(
-          'flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium leading-none',
-          isOtherMonth && 'text-slate-300',
-          isToday && !isOtherMonth && 'bg-blue-600 text-white font-semibold',
-          !isToday && !isOtherMonth && 'text-slate-700'
-        )}
-      >
-        {day}
-      </span>
-
-      {/* Post dots */}
-      {!isOtherMonth && visibleDots.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-0.5">
-          {visibleDots.map((post) => (
-            <span
-              key={post.id}
-              className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[post.status])}
-              title={post.title}
-            />
-          ))}
-          {overflow > 0 && (
-            <span className="text-[10px] leading-none text-slate-500 self-center">
-              +{overflow}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Mobile: compact count */}
-      {!isOtherMonth && posts.length > 0 && (
-        <div className="absolute bottom-1.5 right-1.5 hidden sm:flex items-center justify-center">
-          <span className="rounded-full bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-500 leading-none">
-            {posts.length}
-          </span>
-        </div>
-      )}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Day sidebar / popover
-// ---------------------------------------------------------------------------
-
-interface DaySidebarProps {
-  day: number;
-  month: number;
-  year: number;
-  posts: Post[];
-  onClose: () => void;
-  onPostClick?: (post: Post) => void;
-}
+const STATUS_CHIP: Record<PostStatus, string> = {
+  draft: 'bg-slate-50 hover:bg-slate-100 text-slate-700',
+  scheduled: 'bg-blue-50 hover:bg-blue-100 text-blue-800',
+  published: 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800',
+  failed: 'bg-red-50 hover:bg-red-100 text-red-800',
+  cancelled: 'bg-orange-50 hover:bg-orange-100 text-orange-800',
+};
 
 const STATUS_LABEL: Record<PostStatus, string> = {
   draft: 'Draft',
@@ -173,7 +86,153 @@ const STATUS_PILL: Record<PostStatus, string> = {
   cancelled: 'bg-orange-100 text-orange-700',
 };
 
-function DaySidebar({ day, month, year, posts, onClose, onPostClick }: DaySidebarProps): React.JSX.Element {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function getFirstDayOfMonth(year: number, month: number): number {
+  return new Date(year, month, 1).getDay();
+}
+
+/** Best available date for placing a post on the calendar. */
+function postDate(p: Post): Date | null {
+  const v = p.scheduledAt ?? p.publishedAt ?? p.createdAt ?? null;
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function timeLabel(p: Post): string | null {
+  const d = postDate(p);
+  if (!d) return null;
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// ---------------------------------------------------------------------------
+// Post chip (inside a day cell)
+// ---------------------------------------------------------------------------
+
+function PostChip({ post, onClick }: { post: Post; onClick: () => void }): React.JSX.Element {
+  const platform = post.platforms[0];
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      title={post.title}
+      className={cn(
+        'group/chip flex w-full items-center gap-1 overflow-hidden rounded-md py-0.5 pl-1 pr-1.5 text-left transition-colors',
+        STATUS_CHIP[post.status]
+      )}
+    >
+      <span className={cn('h-3 w-0.5 shrink-0 rounded-full', STATUS_BAR[post.status])} />
+      {platform ? (
+        <PlatformIcon platform={platform} size="sm" />
+      ) : post.thumbnail ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={post.thumbnail} alt="" className="h-3.5 w-3.5 shrink-0 rounded object-cover" />
+      ) : null}
+      <span className="truncate text-[11px] font-medium leading-tight">{post.title}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DayCell sub-component
+// ---------------------------------------------------------------------------
+
+interface DayCellProps {
+  day: number;
+  isToday: boolean;
+  isOtherMonth: boolean;
+  posts: Post[];
+  onOpenDay: (day: number) => void;
+  onPostClick?: (post: Post) => void;
+}
+
+const MAX_CHIPS = 2;
+
+function DayCell({ day, isToday, isOtherMonth, posts, onOpenDay, onPostClick }: DayCellProps): React.JSX.Element {
+  const hasPosts = posts.length > 0;
+  const visible = posts.slice(0, MAX_CHIPS);
+  const overflow = posts.length - visible.length;
+
+  return (
+    <div
+      onClick={() => hasPosts && onOpenDay(day)}
+      className={cn(
+        'relative flex min-h-[104px] w-full flex-col gap-1 rounded-xl border p-1.5 transition-colors',
+        isOtherMonth
+          ? 'border-transparent bg-slate-50/40'
+          : hasPosts
+          ? 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm cursor-pointer'
+          : 'border-slate-200 bg-white'
+      )}
+    >
+      {/* Day number */}
+      <div className="flex items-center justify-between px-0.5">
+        <span
+          className={cn(
+            'flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium leading-none',
+            isOtherMonth && 'text-slate-300',
+            isToday && !isOtherMonth && 'bg-blue-600 text-white font-semibold',
+            !isToday && !isOtherMonth && 'text-slate-700'
+          )}
+        >
+          {day}
+        </span>
+        {!isOtherMonth && hasPosts && (
+          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-slate-500">
+            {posts.length}
+          </span>
+        )}
+      </div>
+
+      {/* Post chips */}
+      {!isOtherMonth && hasPosts && (
+        <div className="flex flex-col gap-0.5">
+          {visible.map((post) => (
+            <PostChip key={post.id} post={post} onClick={() => onPostClick?.(post)} />
+          ))}
+          {overflow > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenDay(day); }}
+              className="rounded-md px-1.5 py-0.5 text-left text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+            >
+              +{overflow} more
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Day modal — lists all posts on a single day
+// ---------------------------------------------------------------------------
+
+interface DayModalProps {
+  day: number;
+  month: number;
+  year: number;
+  posts: Post[];
+  onClose: () => void;
+  onPostClick?: (post: Post) => void;
+}
+
+function DayModal({ day, month, year, posts, onClose, onPostClick }: DayModalProps): React.JSX.Element {
   const dateLabel = new Date(year, month, day).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
@@ -182,53 +241,77 @@ function DaySidebar({ day, month, year, posts, onClose, onPostClick }: DaySideba
   });
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-lg">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{dateLabel}</p>
-          <p className="text-xs text-slate-500">{posts.length} post{posts.length !== 1 ? 's' : ''}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-          aria-label="Close day details"
-        >
-          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
-        {posts.map((post) => (
-          <button
-            key={post.id}
-            type="button"
-            onClick={() => onPostClick?.(post)}
-            className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-          >
-            <span className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', STATUS_DOT[post.status])} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-slate-800">{post.title}</p>
-              <div className="mt-0.5 flex items-center gap-2">
-                <span className={cn('rounded-full px-1.5 py-0.5 text-[11px] font-medium', STATUS_PILL[post.status])}>
-                  {STATUS_LABEL[post.status]}
-                </span>
-                {post.scheduledAt !== null && (
-                  <span className="text-xs text-slate-400">
-                    {new Date(post.scheduledAt).toLocaleTimeString('en-US', {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </span>
+    <Dialog
+      open
+      onClose={onClose}
+      title={dateLabel}
+      description={`${posts.length} post${posts.length !== 1 ? 's' : ''} on this day`}
+      maxWidth="max-w-lg"
+    >
+      <div className="-mx-1 max-h-[60vh] space-y-2 overflow-y-auto px-1 py-1">
+        {posts.map((post) => {
+          const time = timeLabel(post);
+          return (
+            <button
+              key={post.id}
+              type="button"
+              onClick={() => onPostClick?.(post)}
+              className="flex w-full items-start gap-3 rounded-xl border border-slate-100 p-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/40"
+            >
+              {/* Thumbnail */}
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
+                {post.thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={post.thumbnail} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-300">
+                    <ImageIcon className="h-4 w-4" />
+                  </div>
                 )}
               </div>
-            </div>
-          </button>
-        ))}
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-slate-800">{post.title}</p>
+                {post.content && (
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-slate-400">{post.content}</p>
+                )}
+
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className={cn('rounded-full px-1.5 py-0.5 text-[11px] font-medium', STATUS_PILL[post.status])}>
+                    {STATUS_LABEL[post.status]}
+                  </span>
+                  {time && (
+                    <span className="flex items-center gap-1 text-xs text-slate-400">
+                      <Clock className="h-3 w-3" />
+                      {time}
+                    </span>
+                  )}
+                  {post.platforms.length > 0 && (
+                    <span className="flex items-center gap-1">
+                      {[...new Set(post.platforms)].map((p) => (
+                        <PlatformIcon key={p} platform={p} size="sm" />
+                      ))}
+                    </span>
+                  )}
+                  {post.metrics && (
+                    <span className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+                      <span className="flex items-center gap-0.5">
+                        <Heart className="h-3 w-3 text-red-400" />
+                        {post.metrics.likes}
+                      </span>
+                      <span className="flex items-center gap-0.5">
+                        <MessageCircle className="h-3 w-3 text-amber-500" />
+                        {post.metrics.comments}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -242,20 +325,29 @@ export function CalendarView({ posts, onPostClick }: CalendarViewProps): React.J
   const [currentMonth, setCurrentMonth] = React.useState(today.getMonth());
   const [selectedDay, setSelectedDay] = React.useState<number | null>(null);
 
-  // Build a map: day number => posts on that day
+  // Build a map: day number => posts on that day (using the best available date).
   const postsByDay = React.useMemo(() => {
     const map = new Map<number, Post[]>();
     posts.forEach((post) => {
-      if (post.scheduledAt === null) return;
-      const d = new Date(post.scheduledAt);
+      const d = postDate(post);
+      if (!d) return;
       if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
         const day = d.getDate();
         const existing = map.get(day) ?? [];
         map.set(day, [...existing, post]);
       }
     });
+    // Sort each day's posts chronologically.
+    for (const [, list] of map) {
+      list.sort((a, b) => (postDate(a)?.getTime() ?? 0) - (postDate(b)?.getTime() ?? 0));
+    }
     return map;
   }, [posts, currentYear, currentMonth]);
+
+  const monthTotal = React.useMemo(
+    () => Array.from(postsByDay.values()).reduce((sum, list) => sum + list.length, 0),
+    [postsByDay]
+  );
 
   function prevMonth(): void {
     if (currentMonth === 0) {
@@ -283,10 +375,6 @@ export function CalendarView({ posts, onPostClick }: CalendarViewProps): React.J
     setSelectedDay(null);
   }
 
-  function handleDayClick(day: number, _dayPosts: Post[]): void {
-    setSelectedDay(day);
-  }
-
   // Grid construction
   const daysInMonth = getDaysInMonth(currentYear, currentMonth);
   const firstDayOfWeek = getFirstDayOfMonth(currentYear, currentMonth);
@@ -299,17 +387,12 @@ export function CalendarView({ posts, onPostClick }: CalendarViewProps): React.J
   type GridCell = { day: number; isOtherMonth: boolean };
   const cells: GridCell[] = [];
 
-  // Leading days from previous month
   for (let i = firstDayOfWeek - 1; i >= 0; i--) {
     cells.push({ day: prevMonthDays - i, isOtherMonth: true });
   }
-
-  // Current month days
   for (let d = 1; d <= daysInMonth; d++) {
     cells.push({ day: d, isOtherMonth: false });
   }
-
-  // Trailing days from next month
   let trailing = 1;
   while (cells.length < 42) {
     cells.push({ day: trailing++, isOtherMonth: true });
@@ -331,6 +414,9 @@ export function CalendarView({ posts, onPostClick }: CalendarViewProps): React.J
           <h2 className="text-lg font-semibold text-slate-900">
             {MONTH_NAMES[currentMonth]} {currentYear}
           </h2>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+            {monthTotal} post{monthTotal !== 1 ? 's' : ''}
+          </span>
           <button
             type="button"
             onClick={goToToday}
@@ -369,51 +455,46 @@ export function CalendarView({ posts, onPostClick }: CalendarViewProps): React.J
         ))}
       </div>
 
-      <div className={cn('grid gap-4', selectedDay !== null ? 'grid-cols-1 lg:grid-cols-[1fr_300px]' : 'grid-cols-1')}>
-        {/* Calendar grid */}
-        <div>
-          {/* Day headers */}
-          <div className="mb-1 grid grid-cols-7 gap-1">
-            {DAY_NAMES.map((name) => (
-              <div
-                key={name}
-                className="py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-slate-400"
-              >
-                {name}
-              </div>
-            ))}
-          </div>
-
-          {/* Day cells */}
-          <div className="grid grid-cols-7 gap-1">
-            {cells.map((cell, idx) => (
-              <DayCell
-                key={idx}
-                day={cell.day}
-                isToday={isToday(cell.day, cell.isOtherMonth)}
-                isOtherMonth={cell.isOtherMonth}
-                posts={cell.isOtherMonth ? [] : (postsByDay.get(cell.day) ?? [])}
-                onDayClick={handleDayClick}
-              />
-            ))}
-          </div>
+      {/* Day headers */}
+      <div>
+        <div className="mb-1 grid grid-cols-7 gap-1">
+          {DAY_NAMES.map((name) => (
+            <div
+              key={name}
+              className="py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-slate-400"
+            >
+              {name}
+            </div>
+          ))}
         </div>
 
-        {/* Day sidebar */}
-        {selectedDay !== null && (
-          <div className="lg:sticky lg:top-4 h-fit">
-            <DaySidebar
-              day={selectedDay}
-              month={currentMonth}
-              year={currentYear}
-              posts={selectedDayPosts}
-              onClose={() => setSelectedDay(null)}
+        {/* Day cells */}
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((cell, idx) => (
+            <DayCell
+              key={idx}
+              day={cell.day}
+              isToday={isToday(cell.day, cell.isOtherMonth)}
+              isOtherMonth={cell.isOtherMonth}
+              posts={cell.isOtherMonth ? [] : (postsByDay.get(cell.day) ?? [])}
+              onOpenDay={(d) => setSelectedDay(d)}
               onPostClick={onPostClick}
             />
-          </div>
-        )}
+          ))}
+        </div>
       </div>
+
+      {/* Day modal */}
+      {selectedDay !== null && selectedDayPosts.length > 0 && (
+        <DayModal
+          day={selectedDay}
+          month={currentMonth}
+          year={currentYear}
+          posts={selectedDayPosts}
+          onClose={() => setSelectedDay(null)}
+          onPostClick={onPostClick}
+        />
+      )}
     </div>
   );
 }
-

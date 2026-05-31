@@ -227,15 +227,15 @@ export function AccountCard({
         {/* Metrics grid */}
         {m && (
           <div className="px-4 pb-3">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-2">
               <MetricPill icon={Users} label="Followers" value={formatNumber(m.followers)} iconClass="text-blue-500" />
               <MetricPill icon={FileText} label="Posts" value={formatNumber(m.posts)} iconClass="text-violet-500" />
+              <MetricPill icon={Eye} label="Impressions" value={formatNumber(m.impressions)} iconClass="text-emerald-500" />
               <MetricPill icon={Heart} label="Likes" value={formatNumber(m.likes)} iconClass="text-red-400" />
               <MetricPill icon={MessageCircle} label="Comments" value={formatNumber(m.comments)} iconClass="text-amber-500" />
-              <MetricPill icon={Eye} label="Impressions" value={formatNumber(m.impressions)} iconClass="text-emerald-500" />
-              <div className="flex items-center gap-1.5" title="Engagement Rate">
+              <div className="flex items-center gap-1.5 min-w-0" title="Engagement Rate">
                 <TrendingUp className="h-3 w-3 shrink-0 text-blue-500" aria-hidden="true" />
-                <span className="text-xs font-semibold text-slate-700">{m.engagementRate.toFixed(1)}%</span>
+                <span className="text-xs font-semibold text-slate-700 truncate">{m.engagementRate.toFixed(1)}%</span>
               </div>
             </div>
 

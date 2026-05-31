@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { PlatformIcon, getPlatformLabel } from '@/components/social/platform-icon';
 import type { Platform } from '@/components/social/platform-icon';
 import { apiClient } from '@/lib/api-client';
+import { resolveAccountId } from '@/lib/account-slug';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -216,9 +217,9 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
 
       {/* Profile info */}
       <div className="px-4 sm:px-6 pb-6">
-        {/* Avatar row */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4 -mt-12 sm:-mt-16">
-          <div className="relative">
+        {/* Avatar (overlaps cover) + action badges (below cover, top-right) */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="relative -mt-12 sm:-mt-16 shrink-0">
             <div className="h-24 w-24 sm:h-32 sm:w-32 rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-3xl sm:text-5xl font-bold shadow-lg overflow-hidden">
               {profile.avatarUrl ? (
                 <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" />
@@ -231,29 +232,7 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
             </div>
           </div>
 
-          <div className="flex-1 min-w-0 sm:pb-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 truncate">
-                {profile.displayName}
-              </h1>
-              {profile.isVerified && (
-                <svg className="h-5 w-5 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" fill="none" />
-                </svg>
-              )}
-            </div>
-            <p className={cn('text-sm text-slate-500', profile.platform === 'twitter' && 'text-base font-medium text-slate-600')}>
-              {profile.platform === 'twitter' ? `@${profile.username}` : `@${profile.username} · ${getPlatformLabel(profile.platform)}`}
-            </p>
-            {profile.platform === 'facebook' && (
-              <Badge variant="default" className="mt-0.5 text-[10px]">Page</Badge>
-            )}
-            {profile.platform === 'linkedin' && (
-              <Badge variant="default" className="mt-0.5 text-[10px] bg-blue-100 text-blue-700 border-blue-200">LinkedIn</Badge>
-            )}
-          </div>
-
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 pt-3">
             <Badge variant={profile.status === 'active' ? 'green' : profile.status === 'expiring' ? 'default' : 'red'}>
               {profile.status === 'active' ? 'Active' : profile.status === 'expiring' ? 'Expiring' : 'Disconnected'}
             </Badge>
@@ -263,6 +242,29 @@ function ProfileHeader({ profile }: { profile: AccountProfile }): React.JSX.Elem
               </a>
             )}
           </div>
+        </div>
+
+        {/* Name / username (below the cover) */}
+        <div className="mt-3 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 truncate">
+              {profile.displayName}
+            </h1>
+            {profile.isVerified && (
+              <svg className="h-5 w-5 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" fill="none" />
+              </svg>
+            )}
+          </div>
+          <p className={cn('text-sm text-slate-500', profile.platform === 'twitter' && 'text-base font-medium text-slate-600')}>
+            {profile.platform === 'twitter' ? `@${profile.username}` : `@${profile.username} · ${getPlatformLabel(profile.platform)}`}
+          </p>
+          {profile.platform === 'facebook' && (
+            <Badge variant="default" className="mt-0.5 text-[10px]">Page</Badge>
+          )}
+          {profile.platform === 'linkedin' && (
+            <Badge variant="default" className="mt-0.5 text-[10px] bg-blue-100 text-blue-700 border-blue-200">LinkedIn</Badge>
+          )}
         </div>
 
         {/* Bio */}
@@ -381,7 +383,7 @@ function getPlaceholderThumbnail(index: number, label: string): string {
   )}`;
 }
 
-function PostGrid({ posts, accountId }: { posts: PostItem[]; accountId: string }): React.JSX.Element {
+function PostGrid({ posts, slug }: { posts: PostItem[]; slug: string }): React.JSX.Element {
   return (
     <div className="grid grid-cols-3 gap-1 sm:gap-2">
       {posts.map((post, i) => {
@@ -389,7 +391,7 @@ function PostGrid({ posts, accountId }: { posts: PostItem[]; accountId: string }
         return (
           <Link
             key={post.id}
-            href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
+            href={`/dashboard/social-accounts/${slug}/posts/${post.id}`}
             className="group relative aspect-[4/5] rounded-lg overflow-hidden bg-slate-100"
           >
             {/* Thumbnail */}
@@ -442,7 +444,10 @@ function PostGrid({ posts, accountId }: { posts: PostItem[]; accountId: string }
 export default function AccountDetailPage(): React.JSX.Element {
   const params = useParams();
   const router = useRouter();
-  const accountId = params.accountId as string;
+  // URL segment is a human-readable slug (e.g. `alp-sigorta-v1doaa`), not the
+  // raw account id. The real id is resolved from the accounts list below.
+  const slug = params.accountId as string;
+  const [accountId, setAccountId] = useState<string>('');
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [viewModeInitialized, setViewModeInitialized] = useState(false);
@@ -460,20 +465,23 @@ export default function AccountDetailPage(): React.JSX.Element {
   // Fetch account profile
   // ---------------------------------------------------------------------------
 
-  const fetchProfile = useCallback(async (): Promise<void> => {
+  const fetchProfile = useCallback(async (): Promise<string | null> => {
     try {
       const accounts = await apiClient.get<ApiAccount[]>('/social-accounts');
-      const account = accounts.find((a) => a.id === accountId);
+      const account = resolveAccountId(slug, accounts);
       if (!account) {
         setNotFound(true);
-        return;
+        return null;
       }
+      setAccountId(account.id);
       setProfile(mapApiToProfile(account));
+      return account.id;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load account';
       setError(message);
+      return null;
     }
-  }, [accountId]);
+  }, [slug]);
 
   // ---------------------------------------------------------------------------
   // Fetch posts for this account
@@ -489,11 +497,12 @@ export default function AccountDetailPage(): React.JSX.Element {
     return [];
   }
 
-  const fetchPosts = useCallback(async (): Promise<void> => {
+  const fetchPosts = useCallback(async (id: string): Promise<void> => {
+    if (!id) return;
     try {
       // Fetch posts targeted to this specific social account only
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await apiClient.get<any>(`/posts?socialAccountId=${accountId}&limit=50`);
+      const response = await apiClient.get<any>(`/posts?socialAccountId=${id}&limit=50`);
       const rawPosts = parsePostResponse(response);
 
       const mapped = rawPosts.map(mapApiToPost);
@@ -504,17 +513,18 @@ export default function AccountDetailPage(): React.JSX.Element {
       // Posts are non-fatal — page still usable without them
       setPosts([]);
     }
-  }, [accountId]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Initial load
   // ---------------------------------------------------------------------------
 
   // Auto-sync: trigger sync on page load (backend skips if recently synced)
-  const autoSync = useCallback(async (): Promise<void> => {
+  const autoSync = useCallback(async (id: string): Promise<void> => {
+    if (!id) return;
     try {
       const result = await apiClient.post<{ synced: number; message: string; skipped?: boolean }>(
-        `/social-accounts/${accountId}/sync`,
+        `/social-accounts/${id}/sync`,
         {},
       );
       if (result?.synced > 0) {
@@ -523,17 +533,21 @@ export default function AccountDetailPage(): React.JSX.Element {
     } catch {
       // Auto-sync is non-fatal
     }
-  }, [accountId]);
+  }, []);
 
   const loadAll = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     setNotFound(false);
-    await fetchProfile();
+    const id = await fetchProfile();
+    if (!id) {
+      setLoading(false);
+      return;
+    }
     // Auto-sync first (backend handles cooldown), then re-fetch profile + posts
-    await autoSync();
+    await autoSync(id);
     await fetchProfile();
-    await fetchPosts();
+    await fetchPosts(id);
     setLoading(false);
   }, [fetchProfile, fetchPosts, autoSync]);
 
@@ -555,6 +569,7 @@ export default function AccountDetailPage(): React.JSX.Element {
   // ---------------------------------------------------------------------------
 
   const handleSync = useCallback(async (): Promise<void> => {
+    if (!accountId) return;
     setSyncing(true);
     setSyncMessage(null);
     try {
@@ -567,7 +582,7 @@ export default function AccountDetailPage(): React.JSX.Element {
       setSyncMessage(message);
       // Always re-fetch profile (for updated followers/following) and posts
       await fetchProfile();
-      await fetchPosts();
+      await fetchPosts(accountId);
     } catch (err) {
       console.error('Sync failed:', err);
       setSyncMessage('Sync failed — check console for details');
@@ -725,7 +740,7 @@ export default function AccountDetailPage(): React.JSX.Element {
               <p className="text-center py-10 text-sm text-slate-400">No posts found</p>
             )
           ) : viewMode === 'grid' ? (
-            <PostGrid posts={filteredPosts} accountId={accountId} />
+            <PostGrid posts={filteredPosts} slug={slug} />
           ) : (
             <div className="space-y-2">
               {filteredPosts.map((post, i) => {
@@ -735,7 +750,7 @@ export default function AccountDetailPage(): React.JSX.Element {
                 return (
                   <Link
                     key={post.id}
-                    href={`/dashboard/social-accounts/${accountId}/posts/${post.id}`}
+                    href={`/dashboard/social-accounts/${slug}/posts/${post.id}`}
                     className={cn(
                       'flex gap-3 p-3 rounded-lg border transition-colors',
                       isTwitter

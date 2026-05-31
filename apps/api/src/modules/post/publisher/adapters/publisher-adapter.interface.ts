@@ -69,6 +69,15 @@ export interface PlatformPublisher {
   getCharacterLimit(): number;
 
   /**
+   * Deletes/unpublishes a previously published post from the platform.
+   *
+   * Optional — platforms that don't support deletion via API (e.g. Instagram)
+   * may omit it. Implementations should throw on API failure so the caller can
+   * log it; callers treat deletion as best-effort and never block on it.
+   */
+  unpublish?(platformPostId: string, account: DecryptedAccount): Promise<void>;
+
+  /**
    * The social platform this adapter handles.
    */
   readonly platform: SocialPlatform;

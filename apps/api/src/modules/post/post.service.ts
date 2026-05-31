@@ -258,6 +258,20 @@ export class PostService {
       await this.scheduler.cancelScheduledPost(postId);
     }
 
+    // Best-effort: delete the post from every platform it was published to,
+    // before removing it from our database. Remote failures are logged but do
+    // not block local deletion.
+    const fullPost = await this.prisma.post.findFirst({
+      where: { id: postId, agencyId },
+      include: {
+        media: true,
+        targets: { include: { socialAccount: true } },
+      },
+    });
+    if (fullPost) {
+      await this.publisher.unpublishPost(fullPost);
+    }
+
     await this.prisma.post.delete({ where: { id: postId } });
     this.logger.log(`Post deleted: id=${postId} agencyId=${agencyId}`);
   }

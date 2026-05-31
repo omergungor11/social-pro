@@ -14,6 +14,7 @@ import { InstagramAccountSelectDialog, type InstagramAccount } from '@/component
 import type { SocialAccount } from '@/components/social/account-card';
 import type { Platform } from '@/components/social/platform-icon';
 import { apiClient } from '@/lib/api-client';
+import { buildAccountSlug } from '@/lib/account-slug';
 
 // ---------------------------------------------------------------------------
 // Filter / Summary helpers
@@ -140,6 +141,15 @@ function EmptyState({ filtered, onConnect }: { filtered: boolean; onConnect: () 
 // Map API response to frontend SocialAccount shape
 // ---------------------------------------------------------------------------
 
+interface ApiAccountMetrics {
+  followers: number;
+  following: number;
+  posts: number;
+  likes: number;
+  comments: number;
+  engagementRate: number;
+}
+
 interface ApiSocialAccount {
   id: string;
   platform: string;
@@ -151,6 +161,7 @@ interface ApiSocialAccount {
   tokenExpiresAt: string | null;
   scopes: string[];
   metadata: Record<string, unknown>;
+  metrics?: ApiAccountMetrics;
   clientId: string | null;
 }
 
@@ -163,6 +174,8 @@ function mapApiAccount(a: ApiSocialAccount): SocialAccount {
   if (!a.isActive) status = 'disconnected';
   else if (isExpiring) status = 'expiring';
 
+  const m = a.metrics;
+
   return {
     id: a.id,
     platform: a.platform.toLowerCase() as Platform,
@@ -172,6 +185,18 @@ function mapApiAccount(a: ApiSocialAccount): SocialAccount {
     status,
     connectedAt: a.connectedAt,
     expiresAt: a.tokenExpiresAt ?? undefined,
+    metrics: m
+      ? {
+          followers: m.followers,
+          followersChange: 0,
+          posts: m.posts,
+          likes: m.likes,
+          comments: m.comments,
+          impressions: 0,
+          engagementRate: m.engagementRate,
+          weeklyData: [],
+        }
+      : undefined,
   };
 }
 
@@ -360,7 +385,7 @@ function SocialAccountsContent(): React.JSX.Element {
                 account={account}
                 onRefresh={handleRefresh}
                 onDisconnect={handleDisconnect}
-                onSelect={(id) => router.push(`/dashboard/social-accounts/${id}`)}
+                onSelect={() => router.push(`/dashboard/social-accounts/${buildAccountSlug({ id: account.id, platform: account.platform, platformUsername: account.username, displayName: account.displayName })}`)}
               />
             ))}
           </div>

@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { SocialAccount, SocialPlatform } from "@social-pro/prisma";
+import { SocialAccount, SocialPlatform, PostStatus } from "@social-pro/prisma";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { EncryptionService } from "./services/encryption.service";
@@ -72,6 +72,20 @@ export type SocialAccountPublic = Omit<
   "accessToken" | "refreshToken"
 >;
 
+/**
+ * Aggregated, per-account engagement metrics returned by listAccounts.
+ * Followers/following/posts come from synced platform metadata; likes/comments
+ * are summed across the account's synced post targets.
+ */
+export interface AccountMetricsPublic {
+  followers: number;
+  following: number;
+  posts: number;
+  likes: number;
+  comments: number;
+  engagementRate: number;
+}
+
 @Injectable()
 export class SocialAccountService {
   private readonly logger = new Logger(SocialAccountService.name);
@@ -104,7 +118,7 @@ export class SocialAccountService {
   async listAccounts(
     agencyId: string,
     query: ListAccountsQueryDto,
-  ): Promise<SocialAccountPublic[]> {
+  ): Promise<Array<SocialAccountPublic & { metrics?: AccountMetricsPublic }>> {
     const accounts = await this.prisma.socialAccount.findMany({
       where: {
         agencyId,
@@ -115,7 +129,70 @@ export class SocialAccountService {
       orderBy: { connectedAt: "desc" },
     });
 
-    return accounts.map((a) => this.stripTokens(a));
+    if (accounts.length === 0) return [];
+
+    // Aggregate per-account engagement from synced post targets.
+    const targets = await this.prisma.postTarget.findMany({
+      where: { socialAccountId: { in: accounts.map((a) => a.id) } },
+      select: { socialAccountId: true, platformSpecificContent: true },
+    });
+
+    const engagementByAccount = new Map<
+      string,
+      { posts: number; likes: number; comments: number }
+    >();
+    for (const t of targets) {
+      const agg =
+        engagementByAccount.get(t.socialAccountId) ??
+        { posts: 0, likes: 0, comments: 0 };
+      const psc =
+        t.platformSpecificContent != null &&
+        typeof t.platformSpecificContent === "object"
+          ? (t.platformSpecificContent as Record<string, unknown>)
+          : {};
+      agg.posts += 1;
+      agg.likes += typeof psc["likes"] === "number" ? psc["likes"] : 0;
+      agg.comments += typeof psc["comments"] === "number" ? psc["comments"] : 0;
+      engagementByAccount.set(t.socialAccountId, agg);
+    }
+
+    return accounts.map((a) => {
+      const meta =
+        a.metadata != null && typeof a.metadata === "object"
+          ? (a.metadata as Record<string, unknown>)
+          : {};
+      const eng = engagementByAccount.get(a.id) ?? {
+        posts: 0,
+        likes: 0,
+        comments: 0,
+      };
+
+      const followers =
+        typeof meta["followersCount"] === "number" ? meta["followersCount"] : 0;
+      const following =
+        typeof meta["followingCount"] === "number" ? meta["followingCount"] : 0;
+      // Prefer the platform-reported post count; fall back to synced post count.
+      const posts =
+        typeof meta["postsCount"] === "number" && meta["postsCount"] > 0
+          ? meta["postsCount"]
+          : eng.posts;
+
+      const engagementRate =
+        followers > 0
+          ? ((eng.likes + eng.comments) / followers) * 100
+          : 0;
+
+      const metrics: AccountMetricsPublic = {
+        followers,
+        following,
+        posts,
+        likes: eng.likes,
+        comments: eng.comments,
+        engagementRate: Number(engagementRate.toFixed(2)),
+      };
+
+      return { ...this.stripTokens(a), metrics };
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -595,10 +672,24 @@ export class SocialAccountService {
       );
     }
 
-    await this.prisma.socialAccount.delete({ where: { id: accountId } });
+    // Deleting the account cascade-deletes its PostTargets. Synced posts that
+    // were only attached to this account would otherwise be left orphaned
+    // (PUBLISHED but with no platform). Clean them up in the same transaction.
+    // Drafts/scheduled posts are preserved even when they have no targets,
+    // since those are user-authored work-in-progress.
+    const [, orphanCleanup] = await this.prisma.$transaction([
+      this.prisma.socialAccount.delete({ where: { id: accountId } }),
+      this.prisma.post.deleteMany({
+        where: {
+          agencyId,
+          status: PostStatus.PUBLISHED,
+          targets: { none: {} },
+        },
+      }),
+    ]);
 
     this.logger.log(
-      `Social account disconnected: id=${accountId} agencyId=${agencyId}`,
+      `Social account disconnected: id=${accountId} agencyId=${agencyId} — removed ${orphanCleanup.count} orphaned synced post(s)`,
     );
   }
 

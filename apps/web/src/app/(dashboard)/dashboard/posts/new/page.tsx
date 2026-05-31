@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ChevronLeft,
+  ChevronDown,
   Sparkles,
   Plus,
   Minus,
@@ -68,6 +69,15 @@ interface ApiClient {
   id: string;
   name?: string | null;
   companyName?: string | null;
+}
+
+interface ApiSocialAccount {
+  id: string;
+  platform: string;
+  platformUsername?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  isActive?: boolean;
 }
 
 interface ApiPostResponse {
@@ -171,52 +181,6 @@ function CharCounter({
 }
 
 // ---------------------------------------------------------------------------
-// Platform toggle button
-// ---------------------------------------------------------------------------
-
-function PlatformToggle({
-  platform,
-  selected,
-  onToggle,
-}: {
-  platform: Platform;
-  selected: boolean;
-  onToggle: (p: Platform) => void;
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={() => onToggle(platform)}
-      className={cn(
-        'flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-all w-full',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1',
-        selected
-          ? 'border-blue-300 bg-blue-50 text-blue-800'
-          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
-      )}
-      aria-pressed={selected}
-      aria-label={`${selected ? 'Deselect' : 'Select'} ${getPlatformLabel(platform)}`}
-    >
-      <PlatformIcon platform={platform} size="sm" />
-      <span className="flex-1 text-sm font-medium">{getPlatformLabel(platform)}</span>
-      <div
-        className={cn(
-          'h-4 w-4 rounded-full border-2 flex items-center justify-center transition-colors shrink-0',
-          selected ? 'border-blue-500 bg-blue-500' : 'border-slate-300 bg-white'
-        )}
-        aria-hidden="true"
-      >
-        {selected && (
-          <svg viewBox="0 0 8 8" className="h-2.5 w-2.5" fill="white" aria-hidden="true">
-            <path d="M1.5 4L3.5 6L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" />
-          </svg>
-        )}
-      </div>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -234,11 +198,13 @@ export default function NewPostPage(): React.JSX.Element {
     ) as Record<Platform, PlatformContent>
   );
 
+  // ── Account / channel selection state ──────────────────────────────────────
+  const [accounts, setAccounts] = React.useState<ApiSocialAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = React.useState(true);
+  const [selectedAccountIds, setSelectedAccountIds] = React.useState<Set<string>>(new Set());
+  const [expandedPlatforms, setExpandedPlatforms] = React.useState<Set<Platform>>(new Set());
+
   // ── Settings state ─────────────────────────────────────────────────────────
-  const [selectedPlatforms, setSelectedPlatforms] = React.useState<Platform[]>([
-    'twitter',
-    'linkedin',
-  ]);
   const [activePlatformTab, setActivePlatformTab] = React.useState<Platform>('twitter');
   const [clientId, setClientId] = React.useState('');
   const [scheduleDate, setScheduleDate] = React.useState('');
@@ -283,6 +249,99 @@ export default function NewPostPage(): React.JSX.Element {
     void loadClients();
   }, []);
 
+  // ── Fetch connected social accounts on mount ───────────────────────────────
+  React.useEffect(() => {
+    async function loadAccounts(): Promise<void> {
+      try {
+        setAccountsLoading(true);
+        const data = await apiClient.get<ApiSocialAccount[]>('/social-accounts');
+        const active = (data ?? []).filter((a) => a.isActive !== false);
+        setAccounts(active);
+        // Expand every platform that has accounts by default.
+        setExpandedPlatforms(
+          new Set(active.map((a) => a.platform.toLowerCase() as Platform))
+        );
+      } catch (err) {
+        console.error('Failed to load social accounts:', err);
+      } finally {
+        setAccountsLoading(false);
+      }
+    }
+    void loadAccounts();
+  }, []);
+
+  // ── Accounts grouped by platform ───────────────────────────────────────────
+  const accountsByPlatform = React.useMemo(() => {
+    const map = new Map<Platform, ApiSocialAccount[]>();
+    accounts.forEach((a) => {
+      const p = a.platform.toLowerCase() as Platform;
+      const list = map.get(p) ?? [];
+      list.push(a);
+      map.set(p, list);
+    });
+    return map;
+  }, [accounts]);
+
+  // Platforms that actually have at least one connected account, in canonical order.
+  const availablePlatforms = React.useMemo(
+    () => ALL_PLATFORMS.filter((p) => accountsByPlatform.has(p)),
+    [accountsByPlatform]
+  );
+
+  // Selected platforms are DERIVED from the selected accounts — drives content
+  // tabs, character limits and the live preview.
+  const selectedPlatforms = React.useMemo<Platform[]>(() => {
+    const set = new Set<Platform>();
+    accounts.forEach((a) => {
+      if (selectedAccountIds.has(a.id)) set.add(a.platform.toLowerCase() as Platform);
+    });
+    return ALL_PLATFORMS.filter((p) => set.has(p));
+  }, [accounts, selectedAccountIds]);
+
+  // Keep the active content tab + preview platform valid as selection changes.
+  React.useEffect(() => {
+    if (selectedPlatforms.length === 0) return;
+    if (!selectedPlatforms.includes(activePlatformTab)) {
+      setActivePlatformTab(selectedPlatforms[0]!);
+    }
+    if (!selectedPlatforms.includes(previewPlatform)) {
+      setPreviewPlatform(selectedPlatforms[0]!);
+    }
+  }, [selectedPlatforms, activePlatformTab, previewPlatform]);
+
+  // ── Account selection helpers ──────────────────────────────────────────────
+  function toggleAccount(id: string): void {
+    setSelectedAccountIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function togglePlatformExpand(p: Platform): void {
+    setExpandedPlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  }
+
+  // Select / deselect all accounts of one platform at once.
+  function togglePlatformAccounts(p: Platform): void {
+    const ids = (accountsByPlatform.get(p) ?? []).map((a) => a.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedAccountIds.has(id));
+    setSelectedAccountIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  }
+
   // ── Client select options ──────────────────────────────────────────────────
   const clientOptions = React.useMemo(() => {
     const base = [{ value: '', label: 'No client (optional)' }];
@@ -308,27 +367,6 @@ export default function NewPostPage(): React.JSX.Element {
 
   function activeLimit(): number {
     return PLATFORM_CHAR_LIMITS[activePlatformTab];
-  }
-
-  function handlePlatformToggle(platform: Platform): void {
-    setSelectedPlatforms((prev) => {
-      if (prev.includes(platform)) {
-        const next = prev.filter((p) => p !== platform);
-        if (activePlatformTab === platform && next.length > 0) {
-          setActivePlatformTab(next[0]!);
-        }
-        if (next.length > 0 && !next.includes(previewPlatform)) {
-          setPreviewPlatform(next[0]!);
-        }
-        return next;
-      } else {
-        if (prev.length === 0) {
-          setActivePlatformTab(platform);
-          setPreviewPlatform(platform);
-        }
-        return [...prev, platform];
-      }
-    });
   }
 
   function handleContentChange(text: string): void {
@@ -385,11 +423,10 @@ export default function NewPostPage(): React.JSX.Element {
       payload['clientId'] = clientId;
     }
 
-    // Note: targets require socialAccountId — we pass platform names as metadata
-    // The backend targets field maps to social accounts via socialAccountId.
-    // Without a social-accounts API integration, we send empty targets.
-    // This creates a DRAFT post for further editing on the detail page.
-    payload['targets'] = [];
+    // Real targets: one per selected social account.
+    payload['targets'] = [...selectedAccountIds].map((socialAccountId) => ({
+      socialAccountId,
+    }));
 
     return payload;
   }
@@ -682,25 +719,156 @@ export default function NewPostPage(): React.JSX.Element {
 
           {/* RIGHT: Settings panel */}
           <div className="space-y-5">
-            {/* Platform selector */}
+            {/* Channel / account selector */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Platforms</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Channels</CardTitle>
+                  {selectedAccountIds.size > 0 && (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                      {selectedAccountIds.size} selected
+                    </span>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  {ALL_PLATFORMS.map((p) => (
-                    <PlatformToggle
-                      key={p}
-                      platform={p}
-                      selected={selectedPlatforms.includes(p)}
-                      onToggle={handlePlatformToggle}
-                    />
-                  ))}
-                </div>
-                {selectedPlatforms.length === 0 && (
+                {accountsLoading ? (
+                  <div className="flex items-center gap-2 py-3 text-xs text-slate-400">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading accounts...
+                  </div>
+                ) : availablePlatforms.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center">
+                    <p className="text-sm text-slate-600">No connected accounts</p>
+                    <Link
+                      href="/dashboard/social-accounts"
+                      className="mt-1 inline-block text-xs font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Connect an account →
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {availablePlatforms.map((p) => {
+                      const platformAccounts = accountsByPlatform.get(p) ?? [];
+                      const selectedCount = platformAccounts.filter((a) =>
+                        selectedAccountIds.has(a.id)
+                      ).length;
+                      const allSelected =
+                        platformAccounts.length > 0 && selectedCount === platformAccounts.length;
+                      const expanded = expandedPlatforms.has(p);
+
+                      return (
+                        <div
+                          key={p}
+                          className={cn(
+                            'overflow-hidden rounded-lg border transition-colors',
+                            selectedCount > 0 ? 'border-blue-200' : 'border-slate-200'
+                          )}
+                        >
+                          {/* Platform header */}
+                          <div
+                            className={cn(
+                              'flex items-center gap-2.5 px-3 py-2.5',
+                              selectedCount > 0 ? 'bg-blue-50/60' : 'bg-white'
+                            )}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => togglePlatformExpand(p)}
+                              className="flex flex-1 items-center gap-2.5 text-left"
+                              aria-expanded={expanded}
+                            >
+                              <PlatformIcon platform={p} size="sm" />
+                              <span className="flex-1 text-sm font-medium text-slate-800">
+                                {getPlatformLabel(p)}
+                              </span>
+                              <span className="text-xs text-slate-400">
+                                {selectedCount > 0
+                                  ? `${selectedCount}/${platformAccounts.length}`
+                                  : platformAccounts.length}
+                              </span>
+                              <ChevronDown
+                                className={cn(
+                                  'h-4 w-4 text-slate-400 transition-transform',
+                                  expanded && 'rotate-180'
+                                )}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Accounts of this platform */}
+                          {expanded && (
+                            <div className="border-t border-slate-100 bg-white">
+                              {platformAccounts.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => togglePlatformAccounts(p)}
+                                  className="flex w-full items-center justify-end gap-1 px-3 py-1.5 text-[11px] font-medium text-blue-600 hover:bg-slate-50"
+                                >
+                                  {allSelected ? 'Deselect all' : 'Select all'}
+                                </button>
+                              )}
+                              {platformAccounts.map((acc) => {
+                                const checked = selectedAccountIds.has(acc.id);
+                                const name = acc.displayName || acc.platformUsername || 'Account';
+                                const handle = acc.platformUsername;
+                                const initial = name.charAt(0).toUpperCase();
+                                return (
+                                  <button
+                                    key={acc.id}
+                                    type="button"
+                                    onClick={() => toggleAccount(acc.id)}
+                                    className={cn(
+                                      'flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors',
+                                      checked ? 'bg-blue-50/60 hover:bg-blue-50' : 'hover:bg-slate-50'
+                                    )}
+                                    aria-pressed={checked}
+                                  >
+                                    {/* Avatar */}
+                                    <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-slate-200">
+                                      {acc.avatarUrl ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={acc.avatarUrl} alt="" className="h-full w-full object-cover" />
+                                      ) : (
+                                        <span className="flex h-full w-full items-center justify-center text-[11px] font-semibold text-slate-500">
+                                          {initial}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-sm font-medium text-slate-800">{name}</p>
+                                      {handle && (
+                                        <p className="truncate text-xs text-slate-400">@{handle}</p>
+                                      )}
+                                    </div>
+                                    {/* Checkbox */}
+                                    <div
+                                      className={cn(
+                                        'flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-colors',
+                                        checked ? 'border-blue-500 bg-blue-500' : 'border-slate-300 bg-white'
+                                      )}
+                                      aria-hidden="true"
+                                    >
+                                      {checked && (
+                                        <svg viewBox="0 0 8 8" className="h-2.5 w-2.5" aria-hidden="true">
+                                          <path d="M1.5 4L3.5 6L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+                                        </svg>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {!accountsLoading && availablePlatforms.length > 0 && selectedAccountIds.size === 0 && (
                   <p className="mt-2 text-xs text-amber-600">
-                    Select at least one platform to publish.
+                    Select at least one account to publish to.
                   </p>
                 )}
               </CardContent>

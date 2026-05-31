@@ -19,6 +19,9 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
+  ArrowUpDown,
+  XCircle,
+  ImageIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -60,12 +63,26 @@ function fmtNum(n: number): string {
 interface ApiPostTarget {
   id?: string;
   platform?: string;
+  status?: string;
+  platformSpecificContent?: {
+    likes?: number;
+    comments?: number;
+    impressions?: number;
+    reach?: number;
+  } | null;
   socialAccount?: {
     id?: string;
     platform?: string;
     platformUsername?: string;
     displayName?: string;
   };
+}
+
+interface ApiPostMedia {
+  id?: string;
+  url?: string;
+  thumbnailUrl?: string | null;
+  mediaType?: string;
 }
 
 interface ApiPostClient {
@@ -93,6 +110,8 @@ interface ApiPostRaw {
   };
   // detail items have full targets array
   targets?: ApiPostTarget[];
+  // list items include the first media item (thumbnail)
+  media?: ApiPostMedia[];
   // some endpoints may return platforms directly
   platforms?: string[];
   metrics?: {
@@ -138,6 +157,38 @@ function mapApiPost(a: ApiPostRaw): Post {
     contentText = a.content;
   }
 
+  // Aggregate engagement from each target's platformSpecificContent.
+  let likes = 0;
+  let comments = 0;
+  let impressions = 0;
+  if (Array.isArray(a.targets)) {
+    for (const t of a.targets) {
+      const psc = t.platformSpecificContent;
+      if (psc) {
+        likes += psc.likes ?? 0;
+        comments += psc.comments ?? 0;
+        impressions += psc.impressions ?? psc.reach ?? 0;
+      }
+    }
+  }
+  // Fall back to a directly-provided metrics object if present.
+  if (a.metrics) {
+    likes = a.metrics.likes ?? likes;
+    comments = a.metrics.comments ?? comments;
+    impressions = a.metrics.impressions ?? impressions;
+  }
+  const engagementRate =
+    a.metrics?.engagementRate != null
+      ? a.metrics.engagementRate
+      : impressions > 0
+      ? Number((((likes + comments) / impressions) * 100).toFixed(1))
+      : 0;
+  const hasEngagement = likes > 0 || comments > 0 || impressions > 0;
+
+  // Resolve a thumbnail from the first media item.
+  const firstMedia = Array.isArray(a.media) ? a.media[0] : undefined;
+  const thumbnail = firstMedia?.thumbnailUrl ?? firstMedia?.url ?? null;
+
   return {
     id: a.id,
     title: a.title ?? 'Untitled Post',
@@ -145,16 +196,13 @@ function mapApiPost(a: ApiPostRaw): Post {
     platforms,
     status: ((a.status ?? 'DRAFT').toLowerCase()) as PostStatus,
     scheduledAt: a.scheduledAt ?? null,
+    publishedAt: a.publishedAt ?? null,
     clientId: a.clientId ?? '',
     clientName: a.client?.name ?? '',
     createdAt: a.createdAt ?? new Date().toISOString(),
-    metrics: a.metrics
-      ? {
-          likes: a.metrics.likes ?? 0,
-          comments: a.metrics.comments ?? 0,
-          impressions: a.metrics.impressions ?? 0,
-          engagementRate: a.metrics.engagementRate ?? 0,
-        }
+    thumbnail,
+    metrics: hasEngagement
+      ? { likes, comments, impressions, engagementRate }
       : undefined,
   };
 }
@@ -243,6 +291,82 @@ const STATUS_BADGE: Record<PostStatus, {
   failed: { variant: 'red', label: 'Failed' },
   cancelled: { variant: 'default', label: 'Cancelled' },
 };
+
+// ---------------------------------------------------------------------------
+// Sorting
+// ---------------------------------------------------------------------------
+
+type SortKey = 'title' | 'status' | 'engagement' | 'scheduled' | 'created';
+
+/** Best available date for a post — the actual "when it went out" timestamp. */
+function effectiveTime(p: Post): number {
+  const v = p.scheduledAt ?? p.publishedAt ?? p.createdAt ?? null;
+  return v ? new Date(v).getTime() : 0;
+}
+
+function sortPosts(list: Post[], key: SortKey, dir: 'asc' | 'desc'): Post[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  const engagementOf = (p: Post): number =>
+    p.metrics ? p.metrics.likes + p.metrics.comments : -1;
+  const timeOf = (v: string | null): number => (v ? new Date(v).getTime() : 0);
+
+  return [...list].sort((a, b) => {
+    switch (key) {
+      case 'title':
+        return sign * a.title.localeCompare(b.title);
+      case 'status':
+        return sign * a.status.localeCompare(b.status);
+      case 'engagement':
+        return sign * (engagementOf(a) - engagementOf(b));
+      case 'scheduled':
+        return sign * (timeOf(a.scheduledAt) - timeOf(b.scheduledAt));
+      case 'created':
+      default:
+        // Order by the post's effective date (published/scheduled), newest first.
+        return sign * (effectiveTime(a) - effectiveTime(b));
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sortable column header
+// ---------------------------------------------------------------------------
+
+function SortHeader({
+  label,
+  sortKey: key,
+  activeKey,
+  dir,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  dir: 'asc' | 'desc';
+  onSort: (k: SortKey) => void;
+  className?: string;
+}): React.JSX.Element {
+  const active = key === activeKey;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        className={cn(
+          'inline-flex items-center gap-1 transition-colors hover:text-slate-900',
+          active ? 'text-slate-900 font-semibold' : 'text-slate-500'
+        )}
+      >
+        {label}
+        <ArrowUpDown
+          className={cn('h-3 w-3 transition-opacity', active ? 'opacity-100' : 'opacity-30')}
+        />
+        {active && <span className="sr-only">{dir === 'asc' ? 'ascending' : 'descending'}</span>}
+      </button>
+    </TableHead>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Row actions dropdown
@@ -372,10 +496,21 @@ export default function PostsPage(): React.JSX.Element {
   const [platformFilter, setPlatformFilter] = React.useState('');
   const [clientFilter, setClientFilter] = React.useState('');
 
+  // Sorting
+  const [sortKey, setSortKey] = React.useState<SortKey>('created');
+  const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('desc');
+
+  // Selection (bulk operations)
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  // Anchor row index for shift-click range selection.
+  const [anchorIndex, setAnchorIndex] = React.useState<number | null>(null);
+
   // Dialogs
   const [deleteTargetId, setDeleteTargetId] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
   const [duplicatingId, setDuplicatingId] = React.useState<string | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+  const [bulkBusy, setBulkBusy] = React.useState(false);
 
   // ── Fetch posts ────────────────────────────────────────────────────────────
   const fetchPosts = React.useCallback(async () => {
@@ -448,6 +583,125 @@ export default function PostsPage(): React.JSX.Element {
       ...Array.from(seen.entries()).map(([value, label]) => ({ value, label })),
     ];
   }, [posts]);
+
+  // ── Sorted view ────────────────────────────────────────────────────────────
+  const sorted = React.useMemo(
+    () => sortPosts(filtered, sortKey, sortDir),
+    [filtered, sortKey, sortDir]
+  );
+
+  function handleSort(key: SortKey): void {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'title' ? 'asc' : 'desc');
+    }
+  }
+
+  // ── Selection helpers ──────────────────────────────────────────────────────
+  // Prune selected ids that are no longer visible after filtering.
+  React.useEffect(() => {
+    setSelectedIds((prev) => {
+      const visible = new Set(sorted.map((p) => p.id));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [sorted]);
+
+  const allSelected = sorted.length > 0 && sorted.every((p) => selectedIds.has(p.id));
+  const someSelected = selectedIds.size > 0 && !allSelected;
+
+  function toggleSelect(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Handle a checkbox click; supports shift-click range selection over the
+  // currently displayed (sorted) order. Works for mouse and keyboard (Space
+  // on a focused checkbox dispatches a click event).
+  function handleRowToggle(e: React.MouseEvent, index: number): void {
+    const id = sorted[index]?.id;
+    if (!id) return;
+
+    if (e.shiftKey && anchorIndex !== null && anchorIndex !== index) {
+      const start = Math.min(anchorIndex, index);
+      const end = Math.max(anchorIndex, index);
+      const rangeIds = sorted.slice(start, end + 1).map((p) => p.id);
+      // Select the whole range if the clicked row was unselected; otherwise
+      // deselect the whole range — matching common spreadsheet behaviour.
+      const shouldSelect = !selectedIds.has(id);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        rangeIds.forEach((rid) => {
+          if (shouldSelect) next.add(rid);
+          else next.delete(rid);
+        });
+        return next;
+      });
+    } else {
+      toggleSelect(id);
+    }
+    setAnchorIndex(index);
+  }
+
+  function toggleSelectAll(): void {
+    setSelectedIds((prev) =>
+      prev.size === sorted.length ? new Set() : new Set(sorted.map((p) => p.id))
+    );
+  }
+
+  // ── Bulk: delete ───────────────────────────────────────────────────────────
+  async function handleBulkDelete(): Promise<void> {
+    const ids = [...selectedIds];
+    setBulkBusy(true);
+    const results = await Promise.allSettled(
+      ids.map((id) => apiClient.delete(`/posts/${id}`))
+    );
+    const okIds = ids.filter((_, i) => results[i]?.status === 'fulfilled');
+    const failed = ids.length - okIds.length;
+    setPosts((prev) => prev.filter((p) => !okIds.includes(p.id)));
+    setTotalCount((prev) => Math.max(0, prev - okIds.length));
+    setSelectedIds(new Set());
+    setBulkDeleteOpen(false);
+    setBulkBusy(false);
+    setToast({
+      message:
+        failed > 0
+          ? `${okIds.length} deleted, ${failed} failed.`
+          : `${okIds.length} post${okIds.length !== 1 ? 's' : ''} deleted.`,
+      type: failed > 0 ? 'error' : 'success',
+    });
+  }
+
+  // ── Bulk: cancel scheduled ─────────────────────────────────────────────────
+  async function handleBulkCancel(): Promise<void> {
+    const ids = sorted
+      .filter((p) => selectedIds.has(p.id) && p.status === 'scheduled')
+      .map((p) => p.id);
+    if (ids.length === 0) {
+      setToast({ message: 'No scheduled posts selected.', type: 'error' });
+      return;
+    }
+    setBulkBusy(true);
+    const results = await Promise.allSettled(
+      ids.map((id) => apiClient.post(`/posts/${id}/cancel`, {}))
+    );
+    const okIds = ids.filter((_, i) => results[i]?.status === 'fulfilled');
+    setPosts((prev) =>
+      prev.map((p) => (okIds.includes(p.id) ? { ...p, status: 'cancelled' as PostStatus } : p))
+    );
+    setSelectedIds(new Set());
+    setBulkBusy(false);
+    setToast({
+      message: `${okIds.length} post${okIds.length !== 1 ? 's' : ''} cancelled.`,
+      type: 'success',
+    });
+  }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
   async function handleDelete(id: string): Promise<void> {
@@ -651,6 +905,45 @@ export default function PostsPage(): React.JSX.Element {
           )}
         </div>
 
+        {/* Bulk action bar */}
+        {view === 'list' && selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5">
+            <span className="text-sm font-medium text-blue-900">
+              {selectedIds.size} selected
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 bg-white"
+                disabled={bulkBusy}
+                onClick={() => void handleBulkCancel()}
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                Cancel scheduled
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 bg-white text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                disabled={bulkBusy}
+                onClick={() => setBulkDeleteOpen(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+              >
+                <X className="h-3.5 w-3.5" />
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Loading state */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -660,32 +953,68 @@ export default function PostsPage(): React.JSX.Element {
           <>
             {/* LIST VIEW */}
             {view === 'list' && (
-              filtered.length === 0 ? (
+              sorted.length === 0 ? (
                 <EmptyState hasFilters={hasFilters} onClear={clearFilters} />
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Post</TableHead>
+                      <TableHead className="w-10">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someSelected;
+                          }}
+                          onChange={toggleSelectAll}
+                          aria-label="Select all posts"
+                          className="h-4 w-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      </TableHead>
+                      <SortHeader label="Post" sortKey="title" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                       <TableHead className="hidden sm:table-cell">Platforms</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="hidden md:table-cell">Engagement</TableHead>
-                      <TableHead className="hidden lg:table-cell">Scheduled</TableHead>
+                      <SortHeader label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Engagement" sortKey="engagement" activeKey={sortKey} dir={sortDir} onSort={handleSort} className="hidden md:table-cell" />
+                      <SortHeader label="Scheduled" sortKey="scheduled" activeKey={sortKey} dir={sortDir} onSort={handleSort} className="hidden lg:table-cell" />
                       <TableHead className="hidden xl:table-cell">Client</TableHead>
                       <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filtered.map((post) => {
+                    {sorted.map((post, index) => {
                       const statusCfg = STATUS_BADGE[post.status] ?? STATUS_BADGE.draft;
                       const m = post.metrics;
                       const isDuplicating = duplicatingId === post.id;
+                      const isSelected = selectedIds.has(post.id);
 
                       return (
-                        <TableRow key={post.id} className={cn(isDuplicating && 'opacity-50')}>
-                          {/* Post — title + content preview + hover tooltip + edit icon */}
+                        <TableRow key={post.id} className={cn(isDuplicating && 'opacity-50', isSelected && 'bg-blue-50/40')}>
+                          {/* Selection checkbox — supports shift-click range select */}
                           <TableCell>
-                            <div className="flex items-start gap-2 max-w-[380px]">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => { /* handled in onClick for shift support */ }}
+                              onClick={(e) => handleRowToggle(e, index)}
+                              aria-label={`Select ${post.title}`}
+                              className="h-4 w-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500 select-none"
+                            />
+                          </TableCell>
+
+                          {/* Post — thumbnail + title + content preview + hover tooltip + edit icon */}
+                          <TableCell>
+                            <div className="flex items-start gap-3 max-w-[420px]">
+                              {/* Thumbnail */}
+                              <div className="mt-0.5 h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-100 bg-slate-50">
+                                {post.thumbnail ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={post.thumbnail} alt="" className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-slate-300">
+                                    <ImageIcon className="h-4 w-4" />
+                                  </div>
+                                )}
+                              </div>
                               <div className="flex-1 min-w-0 relative group/preview">
                                 <Link
                                   href={`/dashboard/posts/${post.id}`}
@@ -817,7 +1146,7 @@ export default function PostsPage(): React.JSX.Element {
             {/* CALENDAR VIEW */}
             {view === 'calendar' && (
               <CalendarView
-                posts={filtered}
+                posts={sorted}
                 onPostClick={(post) => {
                   window.location.href = `/dashboard/posts/${post.id}`;
                 }}
@@ -856,6 +1185,30 @@ export default function PostsPage(): React.JSX.Element {
               </>
             ) : (
               'Delete Post'
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Bulk delete confirmation dialog */}
+      <Dialog
+        open={bulkDeleteOpen}
+        onClose={() => setBulkDeleteOpen(false)}
+        title={`Delete ${selectedIds.size} post${selectedIds.size !== 1 ? 's' : ''}`}
+        description="This will permanently remove the selected posts and any associated schedules. This action cannot be undone."
+      >
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setBulkDeleteOpen(false)} disabled={bulkBusy}>
+            Cancel
+          </Button>
+          <Button variant="destructive" disabled={bulkBusy} onClick={() => void handleBulkDelete()}>
+            {bulkBusy ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              `Delete ${selectedIds.size} post${selectedIds.size !== 1 ? 's' : ''}`
             )}
           </Button>
         </DialogFooter>
