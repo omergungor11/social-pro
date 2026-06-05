@@ -147,6 +147,7 @@ interface ApiAccountMetrics {
   posts: number;
   likes: number;
   comments: number;
+  impressions: number;
   engagementRate: number;
 }
 
@@ -192,7 +193,7 @@ function mapApiAccount(a: ApiSocialAccount): SocialAccount {
           posts: m.posts,
           likes: m.likes,
           comments: m.comments,
-          impressions: 0,
+          impressions: m.impressions ?? 0,
           engagementRate: m.engagementRate,
           weeklyData: [],
         }

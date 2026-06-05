@@ -83,6 +83,7 @@ export interface AccountMetricsPublic {
   posts: number;
   likes: number;
   comments: number;
+  impressions: number;
   engagementRate: number;
 }
 
@@ -139,12 +140,12 @@ export class SocialAccountService {
 
     const engagementByAccount = new Map<
       string,
-      { posts: number; likes: number; comments: number }
+      { posts: number; likes: number; comments: number; impressions: number }
     >();
     for (const t of targets) {
       const agg =
         engagementByAccount.get(t.socialAccountId) ??
-        { posts: 0, likes: 0, comments: 0 };
+        { posts: 0, likes: 0, comments: 0, impressions: 0 };
       const psc =
         t.platformSpecificContent != null &&
         typeof t.platformSpecificContent === "object"
@@ -153,6 +154,7 @@ export class SocialAccountService {
       agg.posts += 1;
       agg.likes += typeof psc["likes"] === "number" ? psc["likes"] : 0;
       agg.comments += typeof psc["comments"] === "number" ? psc["comments"] : 0;
+      agg.impressions += typeof psc["impressions"] === "number" ? psc["impressions"] : 0;
       engagementByAccount.set(t.socialAccountId, agg);
     }
 
@@ -165,6 +167,7 @@ export class SocialAccountService {
         posts: 0,
         likes: 0,
         comments: 0,
+        impressions: 0,
       };
 
       const followers =
@@ -177,10 +180,15 @@ export class SocialAccountService {
           ? meta["postsCount"]
           : eng.posts;
 
+      // Engagement rate = average interactions per post ÷ followers × 100.
+      // Using total interactions ÷ followers inflates the rate for accounts
+      // with many posts and few followers (e.g. 359%); the per-post average is
+      // the standard definition.
+      const engagedPosts = eng.posts > 0 ? eng.posts : 0;
+      const avgInteractionsPerPost =
+        engagedPosts > 0 ? (eng.likes + eng.comments) / engagedPosts : 0;
       const engagementRate =
-        followers > 0
-          ? ((eng.likes + eng.comments) / followers) * 100
-          : 0;
+        followers > 0 ? (avgInteractionsPerPost / followers) * 100 : 0;
 
       const metrics: AccountMetricsPublic = {
         followers,
@@ -188,6 +196,7 @@ export class SocialAccountService {
         posts,
         likes: eng.likes,
         comments: eng.comments,
+        impressions: eng.impressions,
         engagementRate: Number(engagementRate.toFixed(2)),
       };
 
@@ -952,6 +961,27 @@ export class SocialAccountService {
             } catch {
               // Non-fatal
             }
+
+            // Fetch view/reach insights for this media (impressions proxy).
+            // Instagram renamed "impressions" to "views" in 2024; try both and
+            // fall back to reach. Any failure is non-fatal — leaves it at 0.
+            try {
+              const insResp = await fetch(
+                `https://graph.facebook.com/v22.0/${post.id}/insights?metric=views,reach&access_token=${accessToken}`,
+              );
+              if (insResp.ok) {
+                const insData = (await insResp.json()) as {
+                  data?: Array<{ name: string; values?: Array<{ value?: number }> }>;
+                };
+                const byName: Record<string, number> = {};
+                for (const m of insData.data ?? []) {
+                  byName[m.name] = m.values?.[0]?.value ?? 0;
+                }
+                post._impressions = byName["views"] ?? byName["reach"] ?? 0;
+              }
+            } catch {
+              // Non-fatal — insights require instagram_manage_insights
+            }
           }
         } else {
           const text = await response.text();
@@ -1180,9 +1210,10 @@ export class SocialAccountService {
         const likes = (p.like_count as number | undefined) ?? (p.likes?.summary?.total_count as number | undefined) ?? (p.reactions?.summary?.total_count as number | undefined) ?? 0;
         const comments = (p.comments_count as number | undefined) ?? (p.comments?.summary?.total_count as number | undefined) ?? 0;
         const commentsList = (p._commentsList as Array<{ id: string; message: string; from?: { name: string }; created_time: string }> | undefined) ?? [];
+        const impressions = (p._impressions as number | undefined) ?? 0;
         await this.prisma.postTarget.update({
           where: { id: existing.id },
-          data: { platformSpecificContent: { likes, comments, commentsList } },
+          data: { platformSpecificContent: { likes, comments, impressions, commentsList } },
         });
         continue;
       }
@@ -1224,6 +1255,7 @@ export class SocialAccountService {
                 platformSpecificContent: {
                   likes: (p.like_count as number | undefined) ?? (p.likes?.summary?.total_count as number | undefined) ?? (p.reactions?.summary?.total_count as number | undefined) ?? 0,
                   comments: (p.comments_count as number | undefined) ?? (p.comments?.summary?.total_count as number | undefined) ?? 0,
+                  impressions: (p._impressions as number | undefined) ?? 0,
                   commentsList: (p._commentsList as Array<{ id: string; message: string; from?: { name: string }; created_time: string }> | undefined) ?? [],
                 },
               },
