@@ -42,6 +42,7 @@ import {
 } from '@/components/social/platform-icon';
 import { CalendarView, type Post, type PostStatus } from '@/components/posts/calendar-view';
 import { apiClient } from '@/lib/api-client';
+import { useBrandStore } from '@/stores/brand-store';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -495,7 +496,7 @@ export default function PostsPage(): React.JSX.Element {
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
   const [platformFilter, setPlatformFilter] = React.useState('');
-  const [clientFilter, setClientFilter] = React.useState('');
+  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   // Sorting
   const [sortKey, setSortKey] = React.useState<SortKey>('created');
@@ -524,7 +525,7 @@ export default function PostsPage(): React.JSX.Element {
       params.set('page', '1');
       if (statusFilter) params.set('status', statusFilter);
       if (platformFilter) params.set('platform', platformFilter);
-      if (clientFilter) params.set('clientId', clientFilter);
+      if (selectedBrandId) params.set('clientId', selectedBrandId);
 
       // The API wraps the paginated response in { data: { items, total, page, limit } }
       // apiClient.get already unwraps the outer { data } envelope
@@ -553,7 +554,7 @@ export default function PostsPage(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, platformFilter, clientFilter]);
+  }, [statusFilter, platformFilter, selectedBrandId]);
 
   React.useEffect(() => {
     void fetchPosts();
@@ -570,20 +571,6 @@ export default function PostsPage(): React.JSX.Element {
         p.content.toLowerCase().includes(q)
     );
   }, [posts, search]);
-
-  // ── Client filter options derived from loaded posts ────────────────────────
-  const clientOptions = React.useMemo(() => {
-    const seen = new Map<string, string>();
-    posts.forEach((p) => {
-      if (p.clientId && p.clientName && !seen.has(p.clientId)) {
-        seen.set(p.clientId, p.clientName);
-      }
-    });
-    return [
-      { value: '', label: 'All Clients' },
-      ...Array.from(seen.entries()).map(([value, label]) => ({ value, label })),
-    ];
-  }, [posts]);
 
   // ── Sorted view ────────────────────────────────────────────────────────────
   const sorted = React.useMemo(
@@ -745,13 +732,12 @@ export default function PostsPage(): React.JSX.Element {
     }
   }
 
-  const hasFilters = Boolean(search || statusFilter || platformFilter || clientFilter);
+  const hasFilters = Boolean(search || statusFilter || platformFilter);
 
   function clearFilters(): void {
     setSearch('');
     setStatusFilter('');
     setPlatformFilter('');
-    setClientFilter('');
   }
 
   return (
@@ -880,18 +866,6 @@ export default function PostsPage(): React.JSX.Element {
               aria-label="Filter by platform"
             />
           </div>
-
-          {/* Client filter */}
-          {clientOptions.length > 1 && (
-            <div className="w-48 shrink-0">
-              <Select
-                value={clientFilter}
-                onChange={(e) => setClientFilter(e.target.value)}
-                options={clientOptions}
-                aria-label="Filter by client"
-              />
-            </div>
-          )}
 
           {/* Clear filters */}
           {hasFilters && (

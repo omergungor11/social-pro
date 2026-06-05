@@ -27,6 +27,7 @@ import {
 import { PlatformIcon, type Platform } from '@/components/social/platform-icon';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
+import { useBrandStore } from '@/stores/brand-store';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -284,6 +285,7 @@ export default function AnalyticsPage(): React.JSX.Element {
   const [overviewMetrics, setOverviewMetrics] = React.useState<OverviewMetric[]>([]);
   const [platformStats, setPlatformStats] = React.useState<PlatformStat[]>([]);
   const [topPosts, setTopPosts] = React.useState<TopPost[]>([]);
+  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   const fetchOverview = React.useCallback(async (range: DateRange): Promise<void> => {
     if (range === 'custom') return; // Custom range requires date picker — skip auto-fetch
@@ -291,8 +293,9 @@ export default function AnalyticsPage(): React.JSX.Element {
     setError(null);
     try {
       const { startDate, endDate } = getRangeDate(range);
+      const brandParam = selectedBrandId ? `&clientId=${selectedBrandId}` : '';
       const data = await apiClient.get<ApiOverviewResponse>(
-        `/analytics/overview?startDate=${startDate}&endDate=${endDate}`
+        `/analytics/overview?startDate=${startDate}&endDate=${endDate}${brandParam}`
       );
 
       const metrics: OverviewMetric[] = [
@@ -360,11 +363,11 @@ export default function AnalyticsPage(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedBrandId]);
 
   React.useEffect(() => {
     void fetchOverview(dateRange);
-  }, [fetchOverview, dateRange]);
+  }, [fetchOverview, dateRange, selectedBrandId]);
 
   const handleDateRangeChange = (range: DateRange): void => {
     setDateRange(range);

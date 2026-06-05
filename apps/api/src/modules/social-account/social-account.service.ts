@@ -681,6 +681,40 @@ export class SocialAccountService {
   }
 
   // ---------------------------------------------------------------------------
+  // Assign to client (brand)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Assigns a social account to a client (brand), or clears the assignment
+   * when clientId is null. Both the account and the target client must belong
+   * to the agency.
+   */
+  async assignClient(
+    agencyId: string,
+    accountId: string,
+    clientId: string | null,
+  ): Promise<SocialAccountPublic> {
+    await this.assertExists(agencyId, accountId);
+
+    if (clientId !== null) {
+      const client = await this.prisma.client.findFirst({
+        where: { id: clientId, agencyId },
+        select: { id: true },
+      });
+      if (!client) {
+        throw new NotFoundException(`Client '${clientId}' not found in this agency`);
+      }
+    }
+
+    const updated = await this.prisma.socialAccount.update({
+      where: { id: accountId },
+      data: { clientId },
+    });
+
+    return this.stripTokens(updated);
+  }
+
+  // ---------------------------------------------------------------------------
   // Disconnect
   // ---------------------------------------------------------------------------
 

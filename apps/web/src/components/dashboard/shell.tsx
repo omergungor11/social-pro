@@ -7,7 +7,7 @@ import {
   LayoutDashboard,
   FileText,
   MessageSquare,
-  Users,
+  Building2,
   Share2,
   BarChart3,
   Sparkles,
@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { useNotificationStore } from "@/stores/notification-store";
 import { NotificationDropdown } from "@/components/dashboard/notification-dropdown";
+import { BrandSelector } from "@/components/dashboard/brand-selector";
 import { useRealtime } from "@/hooks/use-realtime";
 
 // ---------------------------------------------------------------------------
@@ -103,7 +104,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Posts", href: "/dashboard/posts", icon: FileText },
   { label: "Comments", href: "/dashboard/comments", icon: MessageSquare },
-  { label: "Clients", href: "/dashboard/clients", icon: Users },
+  { label: "Brands", href: "/dashboard/brands", icon: Building2 },
   { label: "Social Accounts", href: "/dashboard/social-accounts", icon: Share2 },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "AI Content", href: "/dashboard/ai", icon: Sparkles, badge: "New" },
@@ -442,6 +443,9 @@ function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
           ))}
         </ol>
       </nav>
+
+      {/* Global brand selector */}
+      <BrandSelector />
 
       {/* Right actions */}
       <div className="flex items-center gap-2 shrink-0">

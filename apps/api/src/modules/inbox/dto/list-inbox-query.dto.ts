@@ -24,6 +24,11 @@ export class ListInboxQueryDto {
   @IsString()
   socialAccountId?: string;
 
+  @ApiPropertyOptional({ description: "Filter by a specific client (brand)" })
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => (value != null ? Number(value) : undefined))

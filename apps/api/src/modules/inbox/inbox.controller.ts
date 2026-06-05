@@ -35,8 +35,11 @@ export class InboxController {
 
   @Get("stats")
   @ApiOperation({ summary: "Inbox counts by platform and type" })
-  async stats(@CurrentAgency() agencyId: string): Promise<unknown> {
-    return this.inboxService.getStats(agencyId);
+  async stats(
+    @CurrentAgency() agencyId: string,
+    @Query("clientId") clientId?: string,
+  ): Promise<unknown> {
+    return this.inboxService.getStats(agencyId, clientId);
   }
 
   @Post("sync")
@@ -45,8 +48,9 @@ export class InboxController {
   async sync(
     @CurrentAgency() agencyId: string,
     @Query("accountId") accountId?: string,
+    @Query("clientId") clientId?: string,
   ): Promise<{ synced: number; message: string }> {
-    return this.inboxService.sync(agencyId, accountId);
+    return this.inboxService.sync(agencyId, accountId, clientId);
   }
 
   @Get(":id")

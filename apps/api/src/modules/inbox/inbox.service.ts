@@ -26,6 +26,7 @@ export interface ListInboxFilters {
   type?: InboxItemType;
   platform?: SocialPlatform;
   socialAccountId?: string;
+  clientId?: string;
   page?: number;
   limit?: number;
 }
@@ -95,12 +96,17 @@ export class InboxService {
    * agency) and upserts them. Best-effort: a failing platform does not block
    * the others. Returns the number of newly stored items.
    */
-  async sync(agencyId: string, accountId?: string): Promise<{ synced: number; message: string }> {
+  async sync(
+    agencyId: string,
+    accountId?: string,
+    clientId?: string,
+  ): Promise<{ synced: number; message: string }> {
     const accounts = await this.prisma.socialAccount.findMany({
       where: {
         agencyId,
         isActive: true,
         ...(accountId ? { id: accountId } : {}),
+        ...(clientId ? { clientId } : {}),
         platform: { in: [...this.adapters.keys()] },
       },
     });
@@ -221,6 +227,7 @@ export class InboxService {
       ...(filters.type ? { type: filters.type } : {}),
       ...(filters.platform ? { platform: filters.platform } : {}),
       ...(filters.socialAccountId ? { socialAccountId: filters.socialAccountId } : {}),
+      ...(filters.clientId ? { socialAccount: { clientId: filters.clientId } } : {}),
       // Top-level inbox shows incoming interactions; our own replies appear
       // nested under their parent in the thread view.
       isOutbound: false,
@@ -262,13 +269,20 @@ export class InboxService {
     return { ...this.toDto(item), replies: replies.map((r) => this.toDto(r)) };
   }
 
-  async getStats(agencyId: string): Promise<{
+  async getStats(
+    agencyId: string,
+    clientId?: string,
+  ): Promise<{
     total: number;
     unread: number;
     byPlatform: Array<{ platform: SocialPlatform; total: number; unread: number }>;
     byType: Array<{ type: InboxItemType; total: number; unread: number }>;
   }> {
-    const base: Prisma.InboxItemWhereInput = { agencyId, isOutbound: false };
+    const base: Prisma.InboxItemWhereInput = {
+      agencyId,
+      isOutbound: false,
+      ...(clientId ? { socialAccount: { clientId } } : {}),
+    };
     const [total, unread, byPlatformRaw, byTypeRaw] = await Promise.all([
       this.prisma.inboxItem.count({ where: base }),
       this.prisma.inboxItem.count({ where: { ...base, status: InboxItemStatus.UNREAD } }),

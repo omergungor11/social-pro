@@ -18,6 +18,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
+import { useBrandStore } from '@/stores/brand-store';
 import type { ApiResponse } from '@social-pro/shared-types';
 
 // ---------------------------------------------------------------------------
@@ -87,9 +88,9 @@ const QUICK_ACTIONS: QuickAction[] = [
     iconBg: 'bg-blue-50',
   },
   {
-    label: 'Add Client',
-    description: 'Onboard a new agency client',
-    href: '/dashboard/clients/new',
+    label: 'Add Brand',
+    description: 'Create a new brand workspace',
+    href: '/dashboard/brands',
     icon: UserPlus,
     iconColor: 'text-violet-600',
     iconBg: 'bg-violet-50',
@@ -211,6 +212,7 @@ function QuickActionCard({
 export default function DashboardPage(): React.JSX.Element {
   const [statsLoading, setStatsLoading] = React.useState(false);
   const [statCards, setStatCards] = React.useState<StatCard[]>([]);
+  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -222,10 +224,14 @@ export default function DashboardPage(): React.JSX.Element {
   const fetchStats = React.useCallback(async (): Promise<void> => {
     setStatsLoading(true);
     try {
+      const brandParam = selectedBrandId ? `&clientId=${selectedBrandId}` : '';
+      const accountsPath = selectedBrandId
+        ? `/social-accounts?clientId=${selectedBrandId}`
+        : '/social-accounts';
       const [clientsData, postsData, socialAccountsData, usageData] = await Promise.all([
         apiClient.getWithMeta<unknown[]>('/clients?limit=1').catch(() => null),
-        apiClient.getWithMeta<unknown[]>('/posts?status=SCHEDULED&limit=1').catch(() => null),
-        apiClient.getWithMeta<unknown[]>('/social-accounts').catch(() => null),
+        apiClient.getWithMeta<unknown[]>(`/posts?status=SCHEDULED&limit=1${brandParam}`).catch(() => null),
+        apiClient.getWithMeta<unknown[]>(accountsPath).catch(() => null),
         apiClient.get<ApiUsageResponse>('/billing/usage').catch(() => null),
       ]);
 
@@ -289,7 +295,7 @@ export default function DashboardPage(): React.JSX.Element {
     } finally {
       setStatsLoading(false);
     }
-  }, []);
+  }, [selectedBrandId]);
 
   React.useEffect(() => {
     void fetchStats();

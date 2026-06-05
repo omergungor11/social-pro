@@ -629,7 +629,7 @@ function DoneStep({
         </p>
         <div className="space-y-2">
           {[
-            { label: "Add your first client", href: "/dashboard/clients" },
+            { label: "Add your first brand", href: "/dashboard/brands" },
             {
               label: "Connect more social accounts",
               href: "/dashboard/social-accounts",

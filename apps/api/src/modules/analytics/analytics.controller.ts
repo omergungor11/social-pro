@@ -54,6 +54,7 @@ export class AnalyticsController {
     return this.aggregation.getOverview(agencyId, {
       startDate: query.startDate,
       endDate: query.endDate,
+      clientId: query.clientId,
     });
   }
 

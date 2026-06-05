@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsDateString, IsOptional } from "class-validator";
+import { IsDateString, IsOptional, IsString } from "class-validator";
 
 export class AnalyticsQueryDto {
   @ApiPropertyOptional({
@@ -17,4 +17,11 @@ export class AnalyticsQueryDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
+
+  @ApiPropertyOptional({
+    description: "Filter by a specific client (brand)",
+  })
+  @IsOptional()
+  @IsString()
+  clientId?: string;
 }

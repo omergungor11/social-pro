@@ -68,6 +68,7 @@ export interface PeriodComparison {
 export interface DateRange {
   startDate?: string;
   endDate?: string;
+  clientId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +89,10 @@ export class AnalyticsAggregationService {
     agencyId: string,
     dateRange: DateRange = {}
   ): Promise<OverviewMetrics> {
+    const { clientId } = dateRange;
+
     const accounts = await this.prisma.socialAccount.findMany({
-      where: { agencyId, isActive: true },
+      where: { agencyId, isActive: true, ...(clientId ? { clientId } : {}) },
       select: { id: true, platform: true, metadata: true },
     });
 
@@ -205,6 +208,7 @@ export class AnalyticsAggregationService {
       where: {
         agencyId,
         status: PostStatus.PUBLISHED,
+        ...(clientId ? { clientId } : {}),
       },
     });
 

@@ -259,7 +259,7 @@ function RowActions({
       {open && (
         <div className="absolute right-0 top-full mt-1 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/10">
           <Link
-            href={`/dashboard/clients/${clientId}`}
+            href={`/dashboard/brands/${clientId}`}
             className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
             onClick={() => setOpen(false)}
           >
@@ -428,7 +428,7 @@ export default function ClientsPage(): React.JSX.Element {
       setClients((prev) => [mapApiClient(created), ...prev]);
       setCreateOpen(false);
       setForm(EMPTY_FORM);
-      setToast({ message: 'Client created successfully', type: 'success' });
+      setToast({ message: 'Brand created successfully', type: 'success' });
     } catch (err) {
       console.error('Failed to create client:', err);
       setToast({ message: 'Failed to create client. Please try again.', type: 'error' });
@@ -448,7 +448,7 @@ export default function ClientsPage(): React.JSX.Element {
         return next;
       });
       setDeleteTargetId(null);
-      setToast({ message: 'Client deleted', type: 'success' });
+      setToast({ message: 'Brand deleted', type: 'success' });
     } catch (err) {
       console.error('Failed to delete client:', err);
       setToast({ message: 'Failed to delete client. Please try again.', type: 'error' });
@@ -465,7 +465,7 @@ export default function ClientsPage(): React.JSX.Element {
       await apiClient.post('/clients/bulk', { operation: 'delete', clientIds: ids });
       setClients((prev) => prev.filter((c) => !selectedIds.has(c.id)));
       setSelectedIds(new Set());
-      setToast({ message: `${ids.length} client${ids.length > 1 ? 's' : ''} deleted`, type: 'success' });
+      setToast({ message: `${ids.length} brand${ids.length > 1 ? 's' : ''} deleted`, type: 'success' });
     } catch (err) {
       console.error('Failed to bulk delete:', err);
       setToast({ message: 'Bulk delete failed. Please try again.', type: 'error' });
@@ -486,7 +486,7 @@ export default function ClientsPage(): React.JSX.Element {
           })
         );
       }
-      setToast({ message: 'Clients added to group', type: 'success' });
+      setToast({ message: 'Brands added to group', type: 'success' });
     } catch (err) {
       console.error('Failed to add to group:', err);
       setToast({ message: 'Failed to add to group. Please try again.', type: 'error' });
@@ -506,7 +506,7 @@ export default function ClientsPage(): React.JSX.Element {
           return { ...c, groups: c.groups.filter((g) => g.id !== groupId) };
         })
       );
-      setToast({ message: 'Clients removed from group', type: 'success' });
+      setToast({ message: 'Brands removed from group', type: 'success' });
     } catch (err) {
       console.error('Failed to remove from group:', err);
       setToast({ message: 'Failed to remove from group. Please try again.', type: 'error' });
@@ -558,13 +558,13 @@ export default function ClientsPage(): React.JSX.Element {
         {/* Page header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Clients</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Brands</h1>
             <p className="mt-0.5 text-sm text-slate-500">
-              {loading ? 'Loading clients...' : `${clients.length} total client${clients.length !== 1 ? 's' : ''}`}
+              {loading ? 'Loading brands...' : `${clients.length} total brand${clients.length !== 1 ? 's' : ''}`}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/dashboard/clients/groups">
+            <Link href="/dashboard/brands/groups">
               <Button variant="outline" size="sm" className="gap-1.5">
                 <Users className="h-4 w-4" />
                 Groups
@@ -572,7 +572,7 @@ export default function ClientsPage(): React.JSX.Element {
             </Link>
             <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
               <Plus className="h-4 w-4" />
-              New Client
+              New Brand
             </Button>
           </div>
         </div>
@@ -692,7 +692,7 @@ export default function ClientsPage(): React.JSX.Element {
                       aria-label="Select all on page"
                     />
                   </TableHead>
-                  <TableHead>Client</TableHead>
+                  <TableHead>Brand</TableHead>
                   <TableHead className="hidden sm:table-cell">Email</TableHead>
                   <TableHead className="hidden md:table-cell">Company</TableHead>
                   <TableHead className="hidden lg:table-cell">Tags</TableHead>
@@ -708,8 +708,8 @@ export default function ClientsPage(): React.JSX.Element {
                       className="py-16 text-center text-slate-400"
                     >
                       {search || groupFilter || tagFilter
-                        ? 'No clients match your filters.'
-                        : 'No clients yet. Create your first client to get started.'}
+                        ? 'No brands match your filters.'
+                        : 'No brands yet. Create your first brand to get started.'}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -730,7 +730,7 @@ export default function ClientsPage(): React.JSX.Element {
                       {/* Name + avatar */}
                       <TableCell>
                         <Link
-                          href={`/dashboard/clients/${client.id}`}
+                          href={`/dashboard/brands/${client.id}`}
                           className="flex items-center gap-3 group"
                         >
                           <ClientAvatar
@@ -843,8 +843,8 @@ export default function ClientsPage(): React.JSX.Element {
           setCreateOpen(false);
           setForm(EMPTY_FORM);
         }}
-        title="New Client"
-        description="Add a new client to your roster."
+        title="New Brand"
+        description="Add a new brand to your roster."
         maxWidth="max-w-lg"
       >
         <div className="space-y-4">
@@ -890,7 +890,7 @@ export default function ClientsPage(): React.JSX.Element {
           <div className="space-y-1.5">
             <label className="text-sm font-medium leading-none">Notes</label>
             <textarea
-              placeholder="Any notes about this client..."
+              placeholder="Any notes about this brand..."
               value={form.notes}
               onChange={(e) =>
                 setForm((f) => ({ ...f, notes: e.target.value }))
@@ -924,7 +924,7 @@ export default function ClientsPage(): React.JSX.Element {
                   Creating...
                 </>
               ) : (
-                'Create Client'
+                'Create Brand'
               )}
             </Button>
           </DialogFooter>
@@ -937,8 +937,8 @@ export default function ClientsPage(): React.JSX.Element {
       <Dialog
         open={deleteTargetId !== null}
         onClose={() => setDeleteTargetId(null)}
-        title="Delete Client"
-        description="This will permanently remove the client and all associated data. This action cannot be undone."
+        title="Delete Brand"
+        description="This will permanently remove the brand and all associated data. This action cannot be undone."
       >
         <DialogFooter>
           <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
@@ -957,7 +957,7 @@ export default function ClientsPage(): React.JSX.Element {
                 Deleting...
               </>
             ) : (
-              'Delete Client'
+              'Delete Brand'
             )}
           </Button>
         </DialogFooter>

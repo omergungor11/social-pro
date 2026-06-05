@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -33,6 +34,7 @@ import {
 import { PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
 import { SelectFacebookPageDto } from "./dto/select-facebook-page.dto";
+import { AssignClientDto } from "./dto/assign-client.dto";
 
 @ApiTags("Social Accounts")
 @ApiBearerAuth()
@@ -300,6 +302,29 @@ export class SocialAccountController {
     @Param("id") accountId: string,
   ): Promise<SocialAccountPublic> {
     return this.socialAccountService.findOne(agencyId, accountId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Assign to client (brand)
+  // ---------------------------------------------------------------------------
+
+  @Patch(":id")
+  @ApiOperation({
+    summary: "Assign a social account to a client (brand)",
+    description:
+      "Assigns the social account to a client (brand), or clears the assignment " +
+      "when clientId is null. Both the account and the client must belong to the agency.",
+  })
+  @ApiParam({ name: "id", description: "Social account ID" })
+  @ApiResponse({ status: 200, description: "Account assignment updated" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  @ApiResponse({ status: 404, description: "Social account or client not found" })
+  async assignClient(
+    @CurrentAgency() agencyId: string,
+    @Param("id") accountId: string,
+    @Body() body: AssignClientDto,
+  ): Promise<SocialAccountPublic> {
+    return this.socialAccountService.assignClient(agencyId, accountId, body.clientId);
   }
 
   // ---------------------------------------------------------------------------

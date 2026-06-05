@@ -329,7 +329,7 @@ function MembersPanel({
               </div>
               <div className="min-w-0 flex-1">
                 <Link
-                  href={`/dashboard/clients/${member.id}`}
+                  href={`/dashboard/brands/${member.id}`}
                   className="text-sm font-medium text-slate-700 hover:text-blue-600 transition-colors truncate block"
                   onClick={onClose}
                 >
@@ -599,13 +599,13 @@ export default function ClientGroupsPage(): React.JSX.Element {
         {/* Page header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/dashboard/clients">
-              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Back to clients">
+            <Link href="/dashboard/brands">
+              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Back to brands">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Client Groups</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Brand Groups</h1>
               <p className="mt-0.5 text-sm text-slate-500">
                 {loading
                   ? 'Loading groups...'
@@ -645,7 +645,7 @@ export default function ClientGroupsPage(): React.JSX.Element {
             <div className="text-center">
               <p className="font-medium text-slate-500">No groups yet</p>
               <p className="mt-1 text-sm text-slate-400">
-                Create your first group to organise clients.
+                Create your first group to organise brands.
               </p>
             </div>
             <Button size="sm" onClick={openCreate} className="gap-1.5">
@@ -689,12 +689,12 @@ export default function ClientGroupsPage(): React.JSX.Element {
         open={dialog?.type === 'create'}
         onClose={closeDialog}
         title="New Group"
-        description="Create a new group to organise your clients."
+        description="Create a new group to organise your brands."
       >
         <div className="space-y-4">
           <Input
             label="Group Name *"
-            placeholder="e.g. Enterprise, VIP Clients"
+            placeholder="e.g. Enterprise, VIP Brands"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             autoFocus
@@ -805,7 +805,7 @@ export default function ClientGroupsPage(): React.JSX.Element {
         title="Delete Group"
         description={
           dialog?.type === 'delete'
-            ? `Are you sure you want to delete "${dialog.group.name}"? This will not delete the clients in this group.`
+            ? `Are you sure you want to delete "${dialog.group.name}"? This will not delete the brands in this group.`
             : 'Are you sure?'
         }
       >
