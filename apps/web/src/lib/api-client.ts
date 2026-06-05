@@ -61,10 +61,14 @@ function buildHeaders(extra?: HeadersInit): Headers {
   return headers;
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  // 204 No Content — return undefined cast to T (caller must handle)
+/**
+ * Parses a response and returns the FULL wrapper ({ data, meta? }).
+ * Use when the caller needs pagination metadata (e.g. meta.total for counts).
+ */
+async function parseWrapped<T>(response: Response): Promise<ApiResponse<T>> {
+  // 204 No Content — return an empty wrapper (caller must handle)
   if (response.status === 204) {
-    return undefined as unknown as T;
+    return { data: undefined as unknown as T };
   }
 
   let body: unknown;
@@ -104,7 +108,11 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
 
   // The API wraps successful responses in { data, meta? }
-  const wrapped = body as ApiResponse<T>;
+  return body as ApiResponse<T>;
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  const wrapped = await parseWrapped<T>(response);
   return wrapped.data;
 }
 
@@ -130,6 +138,28 @@ async function request<T>(
   return parseResponse<T>(response);
 }
 
+/**
+ * Like request(), but returns the full { data, meta? } wrapper so callers can
+ * read pagination metadata (e.g. meta.total).
+ */
+async function requestRaw<T>(
+  method: string,
+  path: string,
+  body?: JsonBody,
+  options?: RequestOptions
+): Promise<ApiResponse<T>> {
+  const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const response = await fetch(url, {
+    ...options,
+    method,
+    headers: buildHeaders(options?.headers),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  return parseWrapped<T>(response);
+}
+
 // ---------------------------------------------------------------------------
 // Public API client
 // ---------------------------------------------------------------------------
@@ -141,6 +171,14 @@ export const apiClient = {
    */
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>("GET", path, undefined, options);
+  },
+
+  /**
+   * HTTP GET that preserves the response envelope, including pagination meta.
+   * @example const { data, meta } = await apiClient.getWithMeta<Post[]>('/posts');
+   */
+  getWithMeta<T>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> {
+    return requestRaw<T>("GET", path, undefined, options);
   },
 
   /**

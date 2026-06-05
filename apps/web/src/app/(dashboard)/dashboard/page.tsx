@@ -18,6 +18,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
+import type { ApiResponse } from '@social-pro/shared-types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,35 +47,30 @@ interface QuickAction {
 // API response types
 // ---------------------------------------------------------------------------
 
-interface ApiClientsResponse {
-  total?: number;
-  count?: number;
-  items?: unknown[];
-}
-
-interface ApiPostsResponse {
-  total?: number;
-  count?: number;
-  items?: unknown[];
-}
-
-interface ApiSocialAccountsResponse {
-  total?: number;
-  count?: number;
-  items?: unknown[];
+interface UsageMetric {
+  metric: string;
+  used: number;
+  limit: number | null;
+  withinLimit: boolean;
 }
 
 interface ApiUsageResponse {
-  aiCredits?: { current?: number; used?: number; limit?: number; max?: number };
+  metrics?: UsageMetric[];
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getCount(data: { total?: number; count?: number; items?: unknown[] } | null): number {
-  if (data === null) return 0;
-  return data.total ?? data.count ?? data.items?.length ?? 0;
+/**
+ * Counts a collection response. Prefers pagination meta.total (accurate even
+ * when only one page is fetched); falls back to the returned array length for
+ * endpoints that return a bare array with no meta (e.g. /social-accounts).
+ */
+function countFromMeta(res: ApiResponse<unknown[]> | null): number {
+  if (res === null) return 0;
+  if (typeof res.meta?.total === 'number') return res.meta.total;
+  return Array.isArray(res.data) ? res.data.length : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,17 +223,18 @@ export default function DashboardPage(): React.JSX.Element {
     setStatsLoading(true);
     try {
       const [clientsData, postsData, socialAccountsData, usageData] = await Promise.all([
-        apiClient.get<ApiClientsResponse>('/clients').catch(() => null),
-        apiClient.get<ApiPostsResponse>('/posts?status=SCHEDULED&limit=1').catch(() => null),
-        apiClient.get<ApiSocialAccountsResponse>('/social-accounts').catch(() => null),
+        apiClient.getWithMeta<unknown[]>('/clients?limit=1').catch(() => null),
+        apiClient.getWithMeta<unknown[]>('/posts?status=SCHEDULED&limit=1').catch(() => null),
+        apiClient.getWithMeta<unknown[]>('/social-accounts').catch(() => null),
         apiClient.get<ApiUsageResponse>('/billing/usage').catch(() => null),
       ]);
 
-      const totalClients = getCount(clientsData);
-      const scheduledPosts = getCount(postsData);
-      const socialAccounts = getCount(socialAccountsData);
-      const aiCreditsUsed = usageData?.aiCredits?.current ?? usageData?.aiCredits?.used ?? 0;
-      const aiCreditsMax = usageData?.aiCredits?.max ?? usageData?.aiCredits?.limit ?? 0;
+      const totalClients = countFromMeta(clientsData);
+      const scheduledPosts = countFromMeta(postsData);
+      const socialAccounts = countFromMeta(socialAccountsData);
+      const aiMetric = usageData?.metrics?.find((m) => m.metric === 'AI_GENERATIONS');
+      const aiCreditsUsed = aiMetric?.used ?? 0;
+      const aiCreditsMax = aiMetric?.limit ?? 0;
       const aiCreditsRemaining = aiCreditsMax > 0 ? aiCreditsMax - aiCreditsUsed : 0;
 
       const cards: StatCard[] = [

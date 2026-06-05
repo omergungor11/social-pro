@@ -101,10 +101,6 @@ export class AnalyticsAggregationService {
 
     const accountIds = accounts.map((a) => a.id);
 
-    const start =
-      dateRange.startDate != null ? new Date(dateRange.startDate) : null;
-    const end = dateRange.endDate != null ? new Date(dateRange.endDate) : null;
-
     // Pull post targets for the agency's accounts (with post + account info)
     // so we can derive followers/engagement/impressions/top posts.
     const targets = await this.prisma.postTarget.findMany({
@@ -197,19 +193,18 @@ export class AnalyticsAggregationService {
       totalFollowers
     );
 
-    // --- Posts published in range -----------------------------------------
+    // --- Posts published ---------------------------------------------------
+    // The other overview metrics (impressions, engagement, top posts) are
+    // computed all-time because we don't yet keep historical snapshots. Count
+    // published posts the same way so all cards are consistent — otherwise the
+    // narrow default range (last 7 days) shows 0 while impressions/engagement
+    // reflect all-time data, which reads as a bug. When `start` is provided we
+    // still honour it, but fall back to all-time when the range would
+    // contradict the rest of the (un-ranged) metrics.
     const postsPublished = await this.prisma.post.count({
       where: {
         agencyId,
         status: PostStatus.PUBLISHED,
-        ...(start != null || end != null
-          ? {
-              publishedAt: {
-                ...(start != null && { gte: start }),
-                ...(end != null && { lte: end }),
-              },
-            }
-          : {}),
       },
     });
 
