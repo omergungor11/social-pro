@@ -56,7 +56,15 @@ export class RateLimitService implements OnModuleDestroy {
     this.redis = new Redis({
       host: process.env.REDIS_HOST ?? "localhost",
       port: Number(process.env.REDIS_PORT ?? 6379),
-      maxRetriesPerRequest: 3,
+      // Managed Redis (Upstash) requires auth + TLS — without these every
+      // command failed and retried, adding seconds of latency to EVERY request
+      // (including /health, which then timed out Render's health check).
+      password: process.env.REDIS_PASSWORD || undefined,
+      tls: process.env.REDIS_TLS === "true" ? {} : undefined,
+      maxRetriesPerRequest: 1,
+      // Fail fast when Redis is unreachable so checkLimit() can fail open
+      // immediately instead of queueing commands.
+      enableOfflineQueue: false,
       lazyConnect: true,
     });
     this.redis.connect().catch(() => {

@@ -37,6 +37,12 @@ export class RateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const response = context.switchToHttp().getResponse<Response>();
 
+    // Never rate-limit the health check — it must answer instantly so the
+    // platform's health probe never times out, regardless of Redis state.
+    if (request.path?.endsWith("/health")) {
+      return true;
+    }
+
     // Determine the rate limit to apply (priority: decorator > group > plan)
     const { key, limit, windowSec } = this.resolveLimit(context, request);
 
