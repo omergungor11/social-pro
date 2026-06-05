@@ -147,11 +147,23 @@ export class InboxService {
     account: SocialAccount,
     items: FetchedInboxItem[],
   ): Promise<number> {
+    const incomingIds = items.map((i) => i.platformItemId).filter(Boolean);
+    if (incomingIds.length === 0) return 0;
+
+    // Pre-compute which ids already exist so we can report an accurate "new"
+    // count without relying on fragile createdAt/updatedAt comparisons.
+    const existing = await this.prisma.inboxItem.findMany({
+      where: { socialAccountId: account.id, platformItemId: { in: incomingIds } },
+      select: { platformItemId: true },
+    });
+    const existingIds = new Set(existing.map((e) => e.platformItemId));
+
     let created = 0;
     for (const item of items) {
       if (!item.platformItemId) continue;
+      const isNew = !existingIds.has(item.platformItemId);
       try {
-        const result = await this.prisma.inboxItem.upsert({
+        await this.prisma.inboxItem.upsert({
           where: {
             socialAccountId_platformItemId: {
               socialAccountId: account.id,
@@ -184,9 +196,7 @@ export class InboxService {
             permalink: item.permalink ?? null,
           },
         });
-        // upsert returns the row in both cases; detect "created" by comparing
-        // timestamps (createdAt === updatedAt on first insert).
-        if (result.createdAt.getTime() === result.updatedAt.getTime()) created += 1;
+        if (isNew) created += 1;
       } catch (err) {
         this.logger.debug(`Skipped inbox item ${item.platformItemId}: ${String(err)}`);
       }
