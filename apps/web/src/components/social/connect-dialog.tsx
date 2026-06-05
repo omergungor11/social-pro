@@ -103,7 +103,9 @@ export function ConnectDialog({
           '/social-accounts/platforms/available'
         );
         if (cancelled) return;
-        setAvailability(new Map(data.map((a) => [a.platform, a])));
+        // Backend returns platforms uppercase (FACEBOOK); the cards key off the
+        // lowercase Platform type (facebook). Normalise so lookups match.
+        setAvailability(new Map(data.map((a) => [a.platform.toLowerCase(), a])));
       } catch (err) {
         if (cancelled) return;
         const message =
