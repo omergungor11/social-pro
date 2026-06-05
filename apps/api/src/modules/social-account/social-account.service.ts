@@ -503,6 +503,11 @@ export class SocialAccountService {
       `Facebook page connected: pageId=${page.pageId} name=${page.pageName} agencyId=${agencyId}`,
     );
 
+    // Pull the account's recent posts immediately so dashboard/posts/analytics
+    // have data right after connecting (otherwise every page stays empty until
+    // the user manually opens the account detail page that auto-syncs).
+    await this.autoSyncOnConnect(agencyId, account.id);
+
     return this.stripTokens(account);
   }
 
@@ -629,7 +634,32 @@ export class SocialAccountService {
       `Instagram account connected: igId=${account.igId} username=${account.username} agencyId=${agencyId}`,
     );
 
+    // Pull recent media immediately so dashboard/posts/analytics have data
+    // right after connecting (see connectFacebookPage for rationale).
+    await this.autoSyncOnConnect(agencyId, saved.id);
+
     return this.stripTokens(saved);
+  }
+
+  /**
+   * Best-effort post sync triggered right after an account is connected.
+   * Failures are logged but never block the connection — the user can still
+   * sync manually from the account detail page.
+   */
+  private async autoSyncOnConnect(
+    agencyId: string,
+    accountId: string,
+  ): Promise<void> {
+    try {
+      const result = await this.syncFromPlatform(agencyId, accountId, true);
+      this.logger.log(
+        `Auto-sync on connect: ${result.synced} posts for account ${accountId}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Auto-sync on connect failed for account ${accountId}: ${String(err)}`,
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
