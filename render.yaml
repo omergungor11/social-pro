@@ -40,8 +40,11 @@ services:
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
+      # ENCRYPTION_KEY decrypts stored OAuth tokens. It must match the key the
+      # tokens were encrypted with — a generated value would not, breaking sync.
+      # Set it in the dashboard to the value the tokens were encrypted under.
       - key: ENCRYPTION_KEY
-        generateValue: true
+        sync: false
       # CORS — set to the web service URL once it exists
       - key: CORS_ORIGIN
         sync: false
