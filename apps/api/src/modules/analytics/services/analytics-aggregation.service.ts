@@ -1,17 +1,47 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { AnalyticsSnapshot, MetricType } from "@social-pro/prisma";
+import {
+  AnalyticsSnapshot,
+  MetricType,
+  PostStatus,
+  SocialPlatform,
+} from "@social-pro/prisma";
 import { PrismaService } from "../../common/prisma/prisma.service";
 
 // ---------------------------------------------------------------------------
 // Response shapes
 // ---------------------------------------------------------------------------
 
+export interface PlatformBreakdownEntry {
+  platform: string;
+  followers: number;
+  followerChange: number;
+  engagementRate: number;
+  impressions: number;
+}
+
+export interface TopPostEntry {
+  id: string;
+  platform: string;
+  content: string;
+  publishedAt: string;
+  likes: number;
+  comments: number;
+  shares: number;
+  engagementRate: number;
+}
+
 export interface OverviewMetrics {
-  agencyId: string;
   totalFollowers: number;
-  averageEngagementRate: number;
+  followerChange: number;
+  engagementRate: number;
+  engagementRateChange: number;
   totalImpressions: number;
+  impressionChange: number;
+  postsPublished: number;
+  postsChange: number;
   accountCount: number;
+  platformBreakdown: PlatformBreakdownEntry[];
+  topPosts: TopPostEntry[];
 }
 
 export interface TimeSeriesPoint {
@@ -54,53 +84,228 @@ export class AnalyticsAggregationService {
   // Overview
   // ---------------------------------------------------------------------------
 
-  async getOverview(agencyId: string): Promise<OverviewMetrics> {
+  async getOverview(
+    agencyId: string,
+    dateRange: DateRange = {}
+  ): Promise<OverviewMetrics> {
     const accounts = await this.prisma.socialAccount.findMany({
       where: { agencyId, isActive: true },
-      select: { id: true },
+      select: { id: true, platform: true, metadata: true },
     });
 
-    const accountIds = accounts.map((a) => a.id);
-    const accountCount = accountIds.length;
+    const accountCount = accounts.length;
 
     if (accountCount === 0) {
-      return {
-        agencyId,
-        totalFollowers: 0,
-        averageEngagementRate: 0,
-        totalImpressions: 0,
-        accountCount: 0,
-      };
+      return this.emptyOverview();
     }
 
-    // Latest snapshot per account per metric type
-    const latestFollowers = await this.latestMetricSum(
-      accountIds,
-      MetricType.FOLLOWERS
-    );
-    const latestImpressions = await this.latestMetricSum(
-      accountIds,
-      MetricType.IMPRESSIONS
-    );
-    const latestEngagement = await this.latestMetricAvg(
-      accountIds,
-      MetricType.ENGAGEMENT
+    const accountIds = accounts.map((a) => a.id);
+
+    const start =
+      dateRange.startDate != null ? new Date(dateRange.startDate) : null;
+    const end = dateRange.endDate != null ? new Date(dateRange.endDate) : null;
+
+    // Pull post targets for the agency's accounts (with post + account info)
+    // so we can derive followers/engagement/impressions/top posts.
+    const targets = await this.prisma.postTarget.findMany({
+      where: { socialAccountId: { in: accountIds } },
+      select: {
+        id: true,
+        socialAccountId: true,
+        platformSpecificContent: true,
+        publishedAt: true,
+        socialAccount: { select: { platform: true } },
+        post: { select: { id: true, content: true, publishedAt: true } },
+      },
+    });
+
+    // --- Followers per platform (from account metadata) -------------------
+    const followersByPlatform = new Map<SocialPlatform, number>();
+    for (const acc of accounts) {
+      const meta =
+        acc.metadata != null && typeof acc.metadata === "object"
+          ? (acc.metadata as Record<string, unknown>)
+          : {};
+      const followers =
+        typeof meta["followersCount"] === "number" ? meta["followersCount"] : 0;
+      followersByPlatform.set(
+        acc.platform,
+        (followersByPlatform.get(acc.platform) ?? 0) + followers
+      );
+    }
+
+    // --- Engagement / impressions per platform (from post targets) --------
+    interface PlatformAgg {
+      posts: number;
+      likes: number;
+      comments: number;
+      impressions: number;
+    }
+    const aggByPlatform = new Map<SocialPlatform, PlatformAgg>();
+    for (const t of targets) {
+      const platform = t.socialAccount.platform;
+      const agg =
+        aggByPlatform.get(platform) ??
+        ({ posts: 0, likes: 0, comments: 0, impressions: 0 } as PlatformAgg);
+      const psc = this.asMetricMap(t.platformSpecificContent);
+      agg.posts += 1;
+      agg.likes += this.numField(psc, "likes");
+      agg.comments += this.numField(psc, "comments");
+      agg.impressions += this.numField(psc, "impressions");
+      aggByPlatform.set(platform, agg);
+    }
+
+    // --- Platform breakdown ------------------------------------------------
+    const platforms = new Set<SocialPlatform>([
+      ...followersByPlatform.keys(),
+      ...aggByPlatform.keys(),
+    ]);
+
+    const platformBreakdown: PlatformBreakdownEntry[] = [];
+    let totalFollowers = 0;
+    let totalImpressions = 0;
+    let totalInteractions = 0;
+    let totalPosts = 0;
+
+    for (const platform of platforms) {
+      const followers = followersByPlatform.get(platform) ?? 0;
+      const agg =
+        aggByPlatform.get(platform) ??
+        ({ posts: 0, likes: 0, comments: 0, impressions: 0 } as PlatformAgg);
+
+      totalFollowers += followers;
+      totalImpressions += agg.impressions;
+      totalInteractions += agg.likes + agg.comments;
+      totalPosts += agg.posts;
+
+      platformBreakdown.push({
+        platform: platform.toLowerCase(),
+        followers,
+        followerChange: 0,
+        engagementRate: this.computeEngagementRate(
+          agg.likes + agg.comments,
+          agg.posts,
+          followers
+        ),
+        impressions: agg.impressions,
+      });
+    }
+
+    const engagementRate = this.computeEngagementRate(
+      totalInteractions,
+      totalPosts,
+      totalFollowers
     );
 
-    // ENGAGEMENT is stored as basis-points (rate * 100) for integer storage
-    const averageEngagementRate = latestEngagement / 100;
+    // --- Posts published in range -----------------------------------------
+    const postsPublished = await this.prisma.post.count({
+      where: {
+        agencyId,
+        status: PostStatus.PUBLISHED,
+        ...(start != null || end != null
+          ? {
+              publishedAt: {
+                ...(start != null && { gte: start }),
+                ...(end != null && { lte: end }),
+              },
+            }
+          : {}),
+      },
+    });
+
+    // --- Top posts (by likes + comments) ----------------------------------
+    const topPosts: TopPostEntry[] = targets
+      .map((t) => {
+        const psc = this.asMetricMap(t.platformSpecificContent);
+        const likes = this.numField(psc, "likes");
+        const comments = this.numField(psc, "comments");
+        const shares = this.numField(psc, "shares");
+        const impressions = this.numField(psc, "impressions");
+        const published = t.publishedAt ?? t.post.publishedAt ?? null;
+        return {
+          id: t.post.id,
+          platform: t.socialAccount.platform.toLowerCase(),
+          content: this.extractContentText(t.post.content),
+          publishedAt: published != null ? published.toISOString() : "",
+          likes,
+          comments,
+          shares,
+          engagementRate: this.computeEngagementRate(
+            likes + comments,
+            1,
+            impressions
+          ),
+          score: likes + comments,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map(({ score: _score, ...rest }) => rest);
 
     this.logger.debug(
-      `Overview agencyId=${agencyId} accounts=${accountCount} followers=${latestFollowers}`
+      `Overview agencyId=${agencyId} accounts=${accountCount} followers=${totalFollowers}`
     );
 
     return {
-      agencyId,
-      totalFollowers: latestFollowers,
-      averageEngagementRate,
-      totalImpressions: latestImpressions,
+      totalFollowers,
+      followerChange: 0,
+      engagementRate,
+      engagementRateChange: 0,
+      totalImpressions,
+      impressionChange: 0,
+      postsPublished,
+      postsChange: 0,
       accountCount,
+      platformBreakdown,
+      topPosts,
     };
+  }
+
+  private emptyOverview(): OverviewMetrics {
+    return {
+      totalFollowers: 0,
+      followerChange: 0,
+      engagementRate: 0,
+      engagementRateChange: 0,
+      totalImpressions: 0,
+      impressionChange: 0,
+      postsPublished: 0,
+      postsChange: 0,
+      accountCount: 0,
+      platformBreakdown: [],
+      topPosts: [],
+    };
+  }
+
+  private asMetricMap(value: unknown): Record<string, unknown> {
+    return value != null && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private numField(map: Record<string, unknown>, key: string): number {
+    const v = map[key];
+    return typeof v === "number" && Number.isFinite(v) ? v : 0;
+  }
+
+  /**
+   * Engagement rate = average interactions per post ÷ followers × 100.
+   * Returns 0 when followers or posts is 0 (avoids divide-by-zero / inflation).
+   */
+  private computeEngagementRate(
+    interactions: number,
+    posts: number,
+    denominator: number
+  ): number {
+    if (posts <= 0 || denominator <= 0) return 0;
+    const rate = (interactions / posts / denominator) * 100;
+    return Number(rate.toFixed(2));
+  }
+
+  private extractContentText(content: unknown): string {
+    const map = this.asMetricMap(content);
+    const text = map["text"];
+    return typeof text === "string" ? text : "";
   }
 
   // ---------------------------------------------------------------------------
@@ -210,54 +415,6 @@ export class AnalyticsAggregationService {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
-
-  private async latestMetricSum(
-    accountIds: string[],
-    metricType: MetricType
-  ): Promise<number> {
-    if (accountIds.length === 0) return 0;
-
-    const result = await this.prisma.$queryRaw<Array<{ total: bigint }>>`
-      SELECT COALESCE(SUM(value), 0) AS total
-      FROM "AnalyticsSnapshot" s
-      INNER JOIN (
-        SELECT "socialAccountId", MAX("fetchedAt") AS max_fetched
-        FROM "AnalyticsSnapshot"
-        WHERE "socialAccountId" = ANY(${accountIds}::text[])
-          AND "metricType" = ${metricType}::"MetricType"
-          AND "postTargetId" IS NULL
-        GROUP BY "socialAccountId"
-      ) latest ON s."socialAccountId" = latest."socialAccountId"
-        AND s."fetchedAt" = latest.max_fetched
-        AND s."metricType" = ${metricType}::"MetricType"
-    `;
-
-    return Number(result[0]?.total ?? 0n);
-  }
-
-  private async latestMetricAvg(
-    accountIds: string[],
-    metricType: MetricType
-  ): Promise<number> {
-    if (accountIds.length === 0) return 0;
-
-    const result = await this.prisma.$queryRaw<Array<{ avg: number }>>`
-      SELECT COALESCE(AVG(value::float), 0) AS avg
-      FROM "AnalyticsSnapshot" s
-      INNER JOIN (
-        SELECT "socialAccountId", MAX("fetchedAt") AS max_fetched
-        FROM "AnalyticsSnapshot"
-        WHERE "socialAccountId" = ANY(${accountIds}::text[])
-          AND "metricType" = ${metricType}::"MetricType"
-          AND "postTargetId" IS NULL
-        GROUP BY "socialAccountId"
-      ) latest ON s."socialAccountId" = latest."socialAccountId"
-        AND s."fetchedAt" = latest.max_fetched
-        AND s."metricType" = ${metricType}::"MetricType"
-    `;
-
-    return Number(result[0]?.avg ?? 0);
-  }
 
   private async periodMetricSum(
     accountIds: string[],

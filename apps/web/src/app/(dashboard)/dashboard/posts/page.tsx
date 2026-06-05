@@ -287,6 +287,7 @@ const STATUS_BADGE: Record<PostStatus, {
 }> = {
   draft: { variant: 'gray', label: 'Draft' },
   scheduled: { variant: 'blue', label: 'Scheduled' },
+  publishing: { variant: 'purple', label: 'Publishing' },
   published: { variant: 'green', label: 'Published' },
   failed: { variant: 'red', label: 'Failed' },
   cancelled: { variant: 'default', label: 'Cancelled' },

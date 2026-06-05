@@ -47,8 +47,14 @@ export class AnalyticsController {
   })
   @ApiResponse({ status: 200, description: "Overview metrics retrieved" })
   @ApiResponse({ status: 401, description: "Unauthenticated" })
-  async getOverview(@CurrentAgency() agencyId: string) {
-    return this.aggregation.getOverview(agencyId);
+  async getOverview(
+    @CurrentAgency() agencyId: string,
+    @Query() query: AnalyticsQueryDto
+  ) {
+    return this.aggregation.getOverview(agencyId, {
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 
   // ---------------------------------------------------------------------------

@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { AnalyticsReport } from "@social-pro/prisma";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AnalyticsAggregationService } from "./analytics-aggregation.service";
@@ -8,8 +13,12 @@ import { CreateReportDto } from "../dto/create-report.dto";
 // Types
 // ---------------------------------------------------------------------------
 
-interface ReportOptions extends CreateReportDto {
-  clientId?: string;
+interface ResolvedReportOptions {
+  title: string;
+  clientId: string | null;
+  reportType: CreateReportDto["resolvedReportType"];
+  dateRangeStart: string;
+  dateRangeEnd: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -31,13 +40,30 @@ export class ReportService {
 
   async generateReport(
     agencyId: string,
-    options: ReportOptions
+    dto: CreateReportDto
   ): Promise<AnalyticsReport> {
+    const dateRangeStart = dto.resolvedStartDate;
+    const dateRangeEnd = dto.resolvedEndDate;
+
+    if (dateRangeStart == null || dateRangeEnd == null) {
+      throw new BadRequestException(
+        "A reporting period is required: provide startDate/endDate (or dateRangeStart/dateRangeEnd)"
+      );
+    }
+
+    const options: ResolvedReportOptions = {
+      title: dto.title,
+      clientId: dto.clientId ?? null,
+      reportType: dto.resolvedReportType,
+      dateRangeStart,
+      dateRangeEnd,
+    };
+
     // Create the report record synchronously
     const report = await this.prisma.analyticsReport.create({
       data: {
         agencyId,
-        clientId: options.clientId ?? null,
+        clientId: options.clientId,
         title: options.title,
         reportType: options.reportType,
         dateRangeStart: new Date(options.dateRangeStart),
@@ -97,7 +123,7 @@ export class ReportService {
   private async populateReportData(
     reportId: string,
     agencyId: string,
-    options: ReportOptions
+    options: ResolvedReportOptions
   ): Promise<void> {
     const overview = await this.aggregation.getOverview(agencyId);
 
