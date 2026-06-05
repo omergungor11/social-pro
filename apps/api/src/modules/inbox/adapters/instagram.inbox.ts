@@ -129,6 +129,76 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
       }
     }
 
+    // 3. Pull recent Instagram direct messages (best-effort).
+    const dms = await this.fetchDirectMessages(account);
+    items.push(...dms);
+
+    return items;
+  }
+
+  /**
+   * Pulls recent Instagram conversations. Requires the
+   * `instagram_manage_messages` permission; without it the Graph API returns
+   * errors (#10, #200, OAuthException). We swallow all errors and return [] so
+   * a missing scope never breaks the comment sync.
+   */
+  private async fetchDirectMessages(
+    account: InboxAccount,
+  ): Promise<FetchedInboxItem[]> {
+    const items: FetchedInboxItem[] = [];
+
+    type Message = {
+      id: string;
+      message?: string;
+      from?: { id?: string; name?: string };
+      created_time?: string;
+    };
+    type Conversation = {
+      id: string;
+      messages?: { data?: Message[] };
+    };
+
+    try {
+      const params = new URLSearchParams({
+        platform: "instagram",
+        fields:
+          "participants,updated_time,messages.limit(15){id,message,from,created_time}",
+        access_token: account.accessToken,
+      });
+      const resp = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/${account.platformUserId}/conversations?${params.toString()}`,
+      );
+      if (!resp.ok) {
+        this.logger.debug(
+          `IG DM fetch skipped for account ${account.id}: ${resp.status}`,
+        );
+        return items;
+      }
+      const data = (await resp.json()) as { data?: Conversation[] };
+
+      for (const conv of data.data ?? []) {
+        for (const m of conv.messages?.data ?? []) {
+          items.push({
+            platformItemId: m.id,
+            type: "DIRECT_MESSAGE",
+            parentPlatformId: conv.id,
+            authorPlatformId: m.from?.id ?? null,
+            authorName: m.from?.name ?? null,
+            text: m.message ?? null,
+            isOutbound: m.from?.id === account.platformUserId,
+            platformCreatedAt: m.created_time
+              ? new Date(m.created_time)
+              : null,
+            raw: m as unknown as Record<string, unknown>,
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `IG DM fetch error for account ${account.id}: ${String(err)}`,
+      );
+    }
+
     return items;
   }
 
@@ -136,7 +206,43 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
     parentPlatformId: string,
     text: string,
     account: InboxAccount,
+    context: {
+      type: string;
+      platformPostId?: string | null;
+      authorPlatformId?: string | null;
+    },
   ): Promise<ReplyResult> {
+    if (context.type === "DIRECT_MESSAGE") {
+      if (!context.authorPlatformId) {
+        throw new Error("Cannot reply to this DM: missing recipient id.");
+      }
+
+      // POST /{ig-id}/messages — Instagram Send API.
+      const params = new URLSearchParams({
+        access_token: account.accessToken,
+      });
+      const resp = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/${account.platformUserId}/messages?${params.toString()}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messaging_type: "RESPONSE",
+            recipient: { id: context.authorPlatformId },
+            message: { text },
+          }),
+        },
+      );
+
+      if (!resp.ok) {
+        const reason = await resp.text();
+        throw new Error(`Instagram DM reply failed: ${reason}`);
+      }
+
+      const data = (await resp.json()) as { message_id: string };
+      return { platformItemId: data.message_id, createdAt: new Date() };
+    }
+
     // POST /{ig-comment-id}/replies — adds a reply under the given comment.
     const params = new URLSearchParams({
       message: text,

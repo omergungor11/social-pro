@@ -2,6 +2,7 @@
 // and add WebhookModule to the imports array.
 import { Module } from "@nestjs/common";
 import { PrismaModule } from "../common/prisma/prisma.module";
+import { InboxModule } from "../inbox/inbox.module";
 import { WebhookController } from "./webhook.controller";
 import { WebhookVerificationService } from "./services/webhook-verification.service";
 import { TwitterWebhookHandler } from "./handlers/twitter-webhook.handler";
@@ -36,7 +37,7 @@ import { YouTubeWebhookHandler } from "./handlers/youtube-webhook.handler";
  * after adding the model to schema.prisma.
  */
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, InboxModule],
   controllers: [WebhookController],
   providers: [
     WebhookVerificationService,

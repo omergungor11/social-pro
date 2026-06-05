@@ -90,8 +90,8 @@ export interface AccountMetricsPublic {
 @Injectable()
 export class SocialAccountService {
   private readonly logger = new Logger(SocialAccountService.name);
-  private readonly fbPagesCache = new Map<string, { pages: FacebookPageInfo[]; expiresAt: number }>();
-  private readonly igAccountsCache = new Map<string, { accounts: InstagramAccountInfo[]; expiresAt: number }>();
+  private readonly fbPagesCache = new Map<string, { pages: FacebookPageInfo[]; scopes: string[]; expiresAt: number }>();
+  private readonly igAccountsCache = new Map<string, { accounts: InstagramAccountInfo[]; scopes: string[]; expiresAt: number }>();
 
   /**
    * API URL used to build platform OAuth callback URIs.
@@ -419,6 +419,7 @@ export class SocialAccountService {
     const cacheKey = `fb_pages_${agencyId}`;
     this.fbPagesCache.set(cacheKey, {
       pages,
+      scopes: tokens.scopes ?? [],
       expiresAt: Date.now() + 10 * 60 * 1000,
     });
 
@@ -443,6 +444,9 @@ export class SocialAccountService {
   ): Promise<SocialAccountPublic> {
     // Resolve page access token: use provided or look up from cache
     let pageAccessToken = page.pageAccessToken;
+    // Granted scopes captured during the OAuth exchange (cached with the pages)
+    // so we can record whether messaging (DM) permissions were granted.
+    let grantedScopes: string[] = [];
     if (!pageAccessToken) {
       const cacheKey = `fb_pages_${agencyId}`;
       const cached = this.fbPagesCache.get(cacheKey);
@@ -455,6 +459,7 @@ export class SocialAccountService {
         throw new BadRequestException("Selected page not found. Please reconnect.");
       }
       pageAccessToken = cachedPage.accessToken;
+      grantedScopes = cached.scopes;
     }
 
     const encryptedAccessToken = this.encryption.encrypt(pageAccessToken);
@@ -474,6 +479,7 @@ export class SocialAccountService {
         avatarUrl: page.pictureUrl ?? null,
         isActive: true,
         lastSyncedAt: new Date(),
+        ...(grantedScopes.length > 0 ? { scopes: grantedScopes } : {}),
         metadata: {
           followersCount: page.followersCount ?? 0,
           category: page.category ?? "",
@@ -491,6 +497,7 @@ export class SocialAccountService {
         isActive: true,
         connectedAt: new Date(),
         lastSyncedAt: new Date(),
+        scopes: grantedScopes,
         metadata: {
           followersCount: page.followersCount ?? 0,
           category: page.category ?? "",
@@ -557,6 +564,7 @@ export class SocialAccountService {
     }));
     this.igAccountsCache.set(cacheKey, {
       accounts: accountsWithTokens,
+      scopes: tokens.scopes ?? [],
       expiresAt: Date.now() + 10 * 60 * 1000,
     });
 
@@ -607,6 +615,7 @@ export class SocialAccountService {
         avatarUrl: account.profilePictureUrl ?? null,
         isActive: true,
         lastSyncedAt: new Date(),
+        ...(cached.scopes.length > 0 ? { scopes: cached.scopes } : {}),
         metadata: {
           followersCount: account.followersCount ?? 0,
           type: "business",
@@ -623,6 +632,7 @@ export class SocialAccountService {
         isActive: true,
         connectedAt: new Date(),
         lastSyncedAt: new Date(),
+        scopes: cached.scopes,
         metadata: {
           followersCount: account.followersCount ?? 0,
           type: "business",

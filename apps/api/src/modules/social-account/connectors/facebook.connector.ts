@@ -28,6 +28,7 @@ export class FacebookConnector implements OAuthConnector {
     "pages_read_engagement",
     "pages_manage_posts",
     "pages_manage_metadata",
+    "pages_messaging",
     "business_management",
   ];
 
@@ -133,10 +134,37 @@ export class FacebookConnector implements OAuthConnector {
         ? new Date(Date.now() + data.expires_in * 1000)
         : undefined;
 
+    const scopes = await this.getGrantedScopes(data.access_token);
+
     return {
       accessToken: data.access_token,
       expiresAt,
+      scopes,
     };
+  }
+
+  /**
+   * Fetches the permissions actually granted by the user so the app can tell
+   * whether DM capabilities (e.g. pages_messaging) are available.
+   */
+  private async getGrantedScopes(accessToken: string): Promise<string[]> {
+    try {
+      const params = new URLSearchParams({ access_token: accessToken });
+      const response = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/me/permissions?${params.toString()}`,
+      );
+      if (!response.ok) return [];
+
+      const data = (await response.json()) as {
+        data?: Array<{ permission: string; status: string }>;
+      };
+
+      return (data.data ?? [])
+        .filter((p) => p.status === "granted")
+        .map((p) => p.permission);
+    } catch {
+      return [];
+    }
   }
 
   /**

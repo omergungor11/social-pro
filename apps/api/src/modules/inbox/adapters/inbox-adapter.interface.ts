@@ -75,7 +75,13 @@ export interface PlatformInboxAdapter {
     parentPlatformId: string,
     text: string,
     account: InboxAccount,
-    context: { type: string; platformPostId?: string | null },
+    context: {
+      type: string;
+      platformPostId?: string | null;
+      // The originating author's platform id (PSID). Required to address the
+      // recipient when replying to a DIRECT_MESSAGE via the platform Send API.
+      authorPlatformId?: string | null;
+    },
   ): Promise<ReplyResult>;
 
   /** Whether this adapter can post replies given current API access. */

@@ -210,6 +210,23 @@ export class InboxService {
     return created;
   }
 
+  /**
+   * Public entry point for webhook-driven ingestion (e.g. real-time DMs and
+   * comments arriving via platform webhooks). Persists items against the given
+   * account, returning the number newly created. Best-effort: never throws.
+   */
+  async persistIncoming(
+    account: SocialAccount,
+    items: FetchedInboxItem[],
+  ): Promise<number> {
+    try {
+      return await this.persistItems(account.agencyId, account, items);
+    } catch (err) {
+      this.logger.warn(`persistIncoming failed for account ${account.id}: ${String(err)}`);
+      return 0;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Read / list
   // ---------------------------------------------------------------------------
@@ -366,6 +383,7 @@ export class InboxService {
     const result = await adapter.reply(item.platformItemId, body, account, {
       type: item.type,
       platformPostId: item.platformPostId,
+      authorPlatformId: item.authorPlatformId,
     });
 
     const [outbound] = await this.prisma.$transaction([

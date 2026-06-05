@@ -1,6 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import type { SocialPlatform } from "@social-pro/prisma";
+import type { SocialAccount, SocialPlatform } from "@social-pro/prisma";
+import { InboxService } from "../../inbox/inbox.service";
+import type { FetchedInboxItem } from "../../inbox/adapters/inbox-adapter.interface";
 
 /**
  * FacebookWebhookHandler
@@ -19,7 +21,10 @@ import type { SocialPlatform } from "@social-pro/prisma";
 export class FacebookWebhookHandler {
   private readonly logger = new Logger(FacebookWebhookHandler.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inboxService: InboxService
+  ) {}
 
   async handle(payload: Record<string, unknown>): Promise<void> {
     try {
@@ -48,26 +53,133 @@ export class FacebookWebhookHandler {
 
     const socialAccount = await this.findSocialAccount(pageId, objectType);
 
+    const items: FetchedInboxItem[] = [];
+
     const changes = entry["changes"];
-    if (!Array.isArray(changes)) return;
+    if (Array.isArray(changes)) {
+      for (const change of changes as Record<string, unknown>[]) {
+        const field = typeof change["field"] === "string" ? change["field"] : "";
+        const value =
+          change["value"] instanceof Object
+            ? (change["value"] as Record<string, unknown>)
+            : {};
 
-    for (const change of changes as Record<string, unknown>[]) {
-      const field = typeof change["field"] === "string" ? change["field"] : "";
-      const value =
-        change["value"] instanceof Object
-          ? (change["value"] as Record<string, unknown>)
-          : {};
+        this.handleChange(field, value, pageId, socialAccount?.id ?? null);
 
-      this.handleChange(field, value, pageId, socialAccount?.id ?? null);
+        const commentItem = this.buildCommentItem(field, value);
+        if (commentItem) items.push(commentItem);
+      }
     }
 
-    // Instagram uses "messaging" array instead of changes
+    // Messenger DMs arrive in the "messaging" array (Facebook + Instagram)
     const messaging = entry["messaging"];
     if (Array.isArray(messaging)) {
       this.logger.log(
         `facebook message events (${messaging.length}) — pageId=${pageId} accountId=${socialAccount?.id ?? "unknown"}`
       );
+      for (const event of messaging as Record<string, unknown>[]) {
+        const dmItem = this.buildDirectMessageItem(event, pageId);
+        if (dmItem) items.push(dmItem);
+      }
     }
+
+    if (socialAccount && items.length > 0) {
+      await this.persist(socialAccount, items);
+    }
+  }
+
+  private async persist(
+    socialAccount: SocialAccount,
+    items: FetchedInboxItem[]
+  ): Promise<void> {
+    try {
+      const created = await this.inboxService.persistIncoming(socialAccount, items);
+      this.logger.log(
+        `facebook webhook persisted ${created}/${items.length} inbox item(s) for account=${socialAccount.id}`
+      );
+    } catch (err) {
+      this.logger.warn(
+        `facebook webhook: failed to persist inbox items for account=${socialAccount.id}: ${String(err)}`
+      );
+    }
+  }
+
+  private buildDirectMessageItem(
+    event: Record<string, unknown>,
+    pageId: string
+  ): FetchedInboxItem | null {
+    const message =
+      event["message"] instanceof Object
+        ? (event["message"] as Record<string, unknown>)
+        : null;
+    if (!message) return null;
+
+    const mid = typeof message["mid"] === "string" ? message["mid"] : null;
+    const text = typeof message["text"] === "string" ? message["text"] : null;
+    if (!mid || !text) return null;
+
+    const sender =
+      event["sender"] instanceof Object
+        ? (event["sender"] as Record<string, unknown>)
+        : null;
+    const senderId = sender && typeof sender["id"] === "string" ? sender["id"] : null;
+
+    const timestamp =
+      typeof event["timestamp"] === "number" ? event["timestamp"] : null;
+
+    return {
+      platformItemId: mid,
+      type: "DIRECT_MESSAGE",
+      parentPlatformId: senderId,
+      authorPlatformId: senderId,
+      text,
+      isOutbound: senderId !== null && senderId === pageId,
+      platformCreatedAt: timestamp !== null ? new Date(timestamp) : null,
+      raw: event,
+    };
+  }
+
+  private buildCommentItem(
+    field: string,
+    value: Record<string, unknown>
+  ): FetchedInboxItem | null {
+    if (field !== "feed") return null;
+    if (value["item"] !== "comment") return null;
+
+    const verb = typeof value["verb"] === "string" ? value["verb"] : "";
+    if (verb !== "add" && verb !== "create") return null;
+
+    const commentId =
+      typeof value["comment_id"] === "string" ? value["comment_id"] : null;
+    if (!commentId) return null;
+
+    const from =
+      value["from"] instanceof Object
+        ? (value["from"] as Record<string, unknown>)
+        : null;
+
+    return {
+      platformItemId: commentId,
+      type: "COMMENT",
+      platformPostId:
+        typeof value["post_id"] === "string" ? value["post_id"] : null,
+      parentPlatformId:
+        typeof value["parent_id"] === "string" ? value["parent_id"] : null,
+      authorPlatformId: from && typeof from["id"] === "string" ? from["id"] : null,
+      authorName: from && typeof from["name"] === "string" ? from["name"] : null,
+      text: typeof value["message"] === "string" ? value["message"] : null,
+      platformCreatedAt: this.parseCommentCreatedAt(value["created_time"]),
+      raw: value,
+    };
+  }
+
+  private parseCommentCreatedAt(raw: unknown): Date | null {
+    if (typeof raw === "number") return new Date(raw * 1000);
+    if (typeof raw === "string") {
+      const date = new Date(raw);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    return null;
   }
 
   private handleChange(
