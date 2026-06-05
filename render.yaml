@@ -23,6 +23,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Public base URL of this API — used to build OAuth callback URIs.
+      # Must match the redirect URIs registered in each platform's dev console.
+      - key: API_URL
+        value: https://social-pro-api.onrender.com
       # Database (Neon) — pooled connection string
       - key: DATABASE_URL
         sync: false
