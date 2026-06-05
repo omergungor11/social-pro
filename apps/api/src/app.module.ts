@@ -15,6 +15,7 @@ import { BillingModule } from "./modules/billing/billing.module";
 import { NotificationModule } from "./modules/notification/notification.module";
 import { AuditModule } from "./modules/audit/audit.module";
 import { WebhookModule } from "./modules/webhook/webhook.module";
+import { InboxModule } from "./modules/inbox/inbox.module";
 import { RateLimitModule } from "./modules/common/rate-limit/rate-limit.module";
 
 @Module({
@@ -34,6 +35,7 @@ import { RateLimitModule } from "./modules/common/rate-limit/rate-limit.module";
     NotificationModule,
     AuditModule,
     WebhookModule,
+    InboxModule,
   ],
   controllers: [AppController],
   providers: [],

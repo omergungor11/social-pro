@@ -1,0 +1,430 @@
+import { Injectable, Logger, NotFoundException, BadRequestException } from "@nestjs/common";
+import {
+  InboxItem,
+  InboxItemStatus,
+  InboxItemType,
+  Prisma,
+  SocialAccount,
+  SocialPlatform,
+} from "@social-pro/prisma";
+import { PrismaService } from "../common/prisma/prisma.service";
+import { EncryptionService } from "../social-account/services/encryption.service";
+import {
+  FetchedInboxItem,
+  InboxAccount,
+  PlatformInboxAdapter,
+} from "./adapters/inbox-adapter.interface";
+import { FacebookInboxAdapter } from "./adapters/facebook.inbox";
+import { InstagramInboxAdapter } from "./adapters/instagram.inbox";
+import { TwitterInboxAdapter } from "./adapters/twitter.inbox";
+import { LinkedInInboxAdapter } from "./adapters/linkedin.inbox";
+
+type InboxItemWithAccount = InboxItem & { socialAccount: SocialAccount };
+
+export interface ListInboxFilters {
+  status?: InboxItemStatus;
+  type?: InboxItemType;
+  platform?: SocialPlatform;
+  socialAccountId?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface InboxItemDto {
+  id: string;
+  socialAccountId: string;
+  platform: SocialPlatform;
+  type: InboxItemType;
+  status: InboxItemStatus;
+  platformItemId: string;
+  parentPlatformId: string | null;
+  platformPostId: string | null;
+  postId: string | null;
+  authorName: string | null;
+  authorUsername: string | null;
+  authorAvatarUrl: string | null;
+  text: string | null;
+  permalink: string | null;
+  isOutbound: boolean;
+  platformCreatedAt: string | null;
+  createdAt: string;
+  account?: {
+    id: string;
+    platform: SocialPlatform;
+    displayName: string | null;
+    username: string | null;
+    avatarUrl: string | null;
+  };
+  replies?: InboxItemDto[];
+}
+
+/**
+ * Orchestrates the unified social inbox: syncing interactions from each
+ * platform, persisting them, listing/threading them for the UI, and dispatching
+ * replies back to the originating platform.
+ *
+ * Tokens are decrypted per-operation and never cached.
+ */
+@Injectable()
+export class InboxService {
+  private readonly logger = new Logger(InboxService.name);
+  private readonly adapters: Map<SocialPlatform, PlatformInboxAdapter>;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
+    private readonly facebookAdapter: FacebookInboxAdapter,
+    private readonly instagramAdapter: InstagramInboxAdapter,
+    private readonly twitterAdapter: TwitterInboxAdapter,
+    private readonly linkedInAdapter: LinkedInInboxAdapter,
+  ) {
+    this.adapters = new Map<SocialPlatform, PlatformInboxAdapter>([
+      [SocialPlatform.FACEBOOK, this.facebookAdapter],
+      [SocialPlatform.INSTAGRAM, this.instagramAdapter],
+      [SocialPlatform.TWITTER, this.twitterAdapter],
+      [SocialPlatform.LINKEDIN, this.linkedInAdapter],
+    ]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sync
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetches new interactions for one account (or all active accounts of the
+   * agency) and upserts them. Best-effort: a failing platform does not block
+   * the others. Returns the number of newly stored items.
+   */
+  async sync(agencyId: string, accountId?: string): Promise<{ synced: number; message: string }> {
+    const accounts = await this.prisma.socialAccount.findMany({
+      where: {
+        agencyId,
+        isActive: true,
+        ...(accountId ? { id: accountId } : {}),
+        platform: { in: [...this.adapters.keys()] },
+      },
+    });
+
+    if (accounts.length === 0) {
+      if (accountId) throw new NotFoundException(`Social account '${accountId}' not found`);
+      return { synced: 0, message: "No connected accounts to sync" };
+    }
+
+    let synced = 0;
+    for (const account of accounts) {
+      const adapter = this.adapters.get(account.platform);
+      if (!adapter) continue;
+
+      let inboxAccount: InboxAccount;
+      try {
+        inboxAccount = this.decryptAccount(account);
+      } catch (err) {
+        this.logger.warn(`Inbox sync: cannot decrypt token for ${account.id}: ${String(err)}`);
+        continue;
+      }
+
+      let items: FetchedInboxItem[] = [];
+      try {
+        items = await adapter.fetchItems(inboxAccount);
+      } catch (err) {
+        this.logger.warn(
+          `Inbox sync failed for ${account.platform} account ${account.id}: ${String(err)}`,
+        );
+        continue;
+      }
+
+      synced += await this.persistItems(agencyId, account, items);
+    }
+
+    return { synced, message: `Synced ${synced} new inbox items` };
+  }
+
+  /**
+   * Upserts fetched items, returning how many were newly created.
+   */
+  private async persistItems(
+    agencyId: string,
+    account: SocialAccount,
+    items: FetchedInboxItem[],
+  ): Promise<number> {
+    let created = 0;
+    for (const item of items) {
+      if (!item.platformItemId) continue;
+      try {
+        const result = await this.prisma.inboxItem.upsert({
+          where: {
+            socialAccountId_platformItemId: {
+              socialAccountId: account.id,
+              platformItemId: item.platformItemId,
+            },
+          },
+          create: {
+            agencyId,
+            socialAccountId: account.id,
+            platform: account.platform,
+            type: item.type as InboxItemType,
+            status: item.isOutbound ? InboxItemStatus.READ : InboxItemStatus.UNREAD,
+            platformItemId: item.platformItemId,
+            parentPlatformId: item.parentPlatformId ?? null,
+            platformPostId: item.platformPostId ?? null,
+            authorPlatformId: item.authorPlatformId ?? null,
+            authorName: item.authorName ?? null,
+            authorUsername: item.authorUsername ?? null,
+            authorAvatarUrl: item.authorAvatarUrl ?? null,
+            text: item.text ?? null,
+            permalink: item.permalink ?? null,
+            isOutbound: item.isOutbound ?? false,
+            platformCreatedAt: item.platformCreatedAt ?? null,
+            raw: (item.raw ?? {}) as Prisma.InputJsonValue,
+          },
+          // Only refresh the mutable text/permalink on re-sync; never resurrect
+          // a read/replied status back to unread.
+          update: {
+            text: item.text ?? null,
+            permalink: item.permalink ?? null,
+          },
+        });
+        // upsert returns the row in both cases; detect "created" by comparing
+        // timestamps (createdAt === updatedAt on first insert).
+        if (result.createdAt.getTime() === result.updatedAt.getTime()) created += 1;
+      } catch (err) {
+        this.logger.debug(`Skipped inbox item ${item.platformItemId}: ${String(err)}`);
+      }
+    }
+    return created;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Read / list
+  // ---------------------------------------------------------------------------
+
+  async list(
+    agencyId: string,
+    filters: ListInboxFilters,
+  ): Promise<{ data: InboxItemDto[]; meta: { page: number; limit: number; total: number; totalPages: number } }> {
+    const page = Math.max(1, filters.page ?? 1);
+    const limit = Math.min(100, Math.max(1, filters.limit ?? 25));
+
+    const where: Prisma.InboxItemWhereInput = {
+      agencyId,
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.type ? { type: filters.type } : {}),
+      ...(filters.platform ? { platform: filters.platform } : {}),
+      ...(filters.socialAccountId ? { socialAccountId: filters.socialAccountId } : {}),
+      // Top-level inbox shows incoming interactions; our own replies appear
+      // nested under their parent in the thread view.
+      isOutbound: false,
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.inboxItem.findMany({
+        where,
+        include: { socialAccount: true },
+        orderBy: [{ platformCreatedAt: "desc" }, { createdAt: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.inboxItem.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r) => this.toDto(r)),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
+    };
+  }
+
+  /**
+   * Returns a single item with its threaded replies (ours + the audience's).
+   */
+  async getThread(agencyId: string, itemId: string): Promise<InboxItemDto> {
+    const item = await this.prisma.inboxItem.findFirst({
+      where: { id: itemId, agencyId },
+      include: { socialAccount: true },
+    });
+    if (!item) throw new NotFoundException(`Inbox item '${itemId}' not found`);
+
+    const replies = await this.prisma.inboxItem.findMany({
+      where: { agencyId, parentPlatformId: item.platformItemId },
+      include: { socialAccount: true },
+      orderBy: [{ platformCreatedAt: "asc" }, { createdAt: "asc" }],
+    });
+
+    return { ...this.toDto(item), replies: replies.map((r) => this.toDto(r)) };
+  }
+
+  async getStats(agencyId: string): Promise<{
+    total: number;
+    unread: number;
+    byPlatform: Array<{ platform: SocialPlatform; total: number; unread: number }>;
+    byType: Array<{ type: InboxItemType; total: number; unread: number }>;
+  }> {
+    const base: Prisma.InboxItemWhereInput = { agencyId, isOutbound: false };
+    const [total, unread, byPlatformRaw, byTypeRaw] = await Promise.all([
+      this.prisma.inboxItem.count({ where: base }),
+      this.prisma.inboxItem.count({ where: { ...base, status: InboxItemStatus.UNREAD } }),
+      this.prisma.inboxItem.groupBy({ by: ["platform"], where: base, _count: { _all: true } }),
+      this.prisma.inboxItem.groupBy({ by: ["type"], where: base, _count: { _all: true } }),
+    ]);
+
+    // Unread counts per dimension (separate grouped query keeps it simple).
+    const unreadByPlatform = await this.prisma.inboxItem.groupBy({
+      by: ["platform"],
+      where: { ...base, status: InboxItemStatus.UNREAD },
+      _count: { _all: true },
+    });
+    const unreadByType = await this.prisma.inboxItem.groupBy({
+      by: ["type"],
+      where: { ...base, status: InboxItemStatus.UNREAD },
+      _count: { _all: true },
+    });
+    const upMap = new Map(unreadByPlatform.map((r) => [r.platform, r._count._all]));
+    const utMap = new Map(unreadByType.map((r) => [r.type, r._count._all]));
+
+    return {
+      total,
+      unread,
+      byPlatform: byPlatformRaw.map((r) => ({
+        platform: r.platform,
+        total: r._count._all,
+        unread: upMap.get(r.platform) ?? 0,
+      })),
+      byType: byTypeRaw.map((r) => ({
+        type: r.type,
+        total: r._count._all,
+        unread: utMap.get(r.type) ?? 0,
+      })),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mutations
+  // ---------------------------------------------------------------------------
+
+  async markStatus(
+    agencyId: string,
+    itemId: string,
+    status: InboxItemStatus,
+  ): Promise<InboxItemDto> {
+    await this.assertExists(agencyId, itemId);
+    const updated = await this.prisma.inboxItem.update({
+      where: { id: itemId },
+      data: { status },
+      include: { socialAccount: true },
+    });
+    return this.toDto(updated);
+  }
+
+  /**
+   * Posts a reply to the platform and records it as an outbound inbox item
+   * threaded under the original. Marks the parent REPLIED.
+   */
+  async reply(agencyId: string, itemId: string, text: string): Promise<InboxItemDto> {
+    const body = text?.trim();
+    if (!body) throw new BadRequestException("Reply text is required");
+
+    const item = await this.prisma.inboxItem.findFirst({
+      where: { id: itemId, agencyId },
+      include: { socialAccount: true },
+    });
+    if (!item) throw new NotFoundException(`Inbox item '${itemId}' not found`);
+
+    const adapter = this.adapters.get(item.platform);
+    if (!adapter) {
+      throw new BadRequestException(`Replies are not supported for ${item.platform}`);
+    }
+    if (!adapter.canReply) {
+      throw new BadRequestException(
+        `Replying on ${item.platform} is not available with the current API access.`,
+      );
+    }
+
+    const account = this.decryptAccount(item.socialAccount);
+    const result = await adapter.reply(item.platformItemId, body, account, {
+      type: item.type,
+      platformPostId: item.platformPostId,
+    });
+
+    const [outbound] = await this.prisma.$transaction([
+      this.prisma.inboxItem.create({
+        data: {
+          agencyId,
+          socialAccountId: item.socialAccountId,
+          platform: item.platform,
+          type: InboxItemType.REPLY,
+          status: InboxItemStatus.READ,
+          platformItemId: result.platformItemId,
+          parentPlatformId: item.platformItemId,
+          platformPostId: item.platformPostId,
+          authorPlatformId: item.socialAccount.platformUserId,
+          authorName: item.socialAccount.displayName,
+          authorUsername: item.socialAccount.platformUsername,
+          authorAvatarUrl: item.socialAccount.avatarUrl,
+          text: body,
+          permalink: result.permalink ?? null,
+          isOutbound: true,
+          platformCreatedAt: result.createdAt ?? null,
+        },
+        include: { socialAccount: true },
+      }),
+      this.prisma.inboxItem.update({
+        where: { id: item.id },
+        data: { status: InboxItemStatus.REPLIED },
+      }),
+    ]);
+
+    return this.toDto(outbound);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  private async assertExists(agencyId: string, itemId: string): Promise<void> {
+    const exists = await this.prisma.inboxItem.findFirst({
+      where: { id: itemId, agencyId },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException(`Inbox item '${itemId}' not found`);
+  }
+
+  private decryptAccount(account: SocialAccount): InboxAccount {
+    return {
+      id: account.id,
+      platform: account.platform,
+      platformUserId: account.platformUserId,
+      platformUsername: account.platformUsername,
+      accessToken: this.encryption.decrypt(account.accessToken),
+      refreshToken: account.refreshToken ? this.encryption.decrypt(account.refreshToken) : null,
+      metadata: (account.metadata as Record<string, unknown>) ?? {},
+    };
+  }
+
+  private toDto(item: InboxItemWithAccount): InboxItemDto {
+    return {
+      id: item.id,
+      socialAccountId: item.socialAccountId,
+      platform: item.platform,
+      type: item.type,
+      status: item.status,
+      platformItemId: item.platformItemId,
+      parentPlatformId: item.parentPlatformId,
+      platformPostId: item.platformPostId,
+      postId: item.postId,
+      authorName: item.authorName,
+      authorUsername: item.authorUsername,
+      authorAvatarUrl: item.authorAvatarUrl,
+      text: item.text,
+      permalink: item.permalink,
+      isOutbound: item.isOutbound,
+      platformCreatedAt: item.platformCreatedAt ? item.platformCreatedAt.toISOString() : null,
+      createdAt: item.createdAt.toISOString(),
+      account: {
+        id: item.socialAccount.id,
+        platform: item.socialAccount.platform,
+        displayName: item.socialAccount.displayName,
+        username: item.socialAccount.platformUsername,
+        avatarUrl: item.socialAccount.avatarUrl,
+      },
+    };
+  }
+}

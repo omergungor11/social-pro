@@ -116,6 +116,20 @@ enum NotificationChannel {
   EMAIL
 }
 
+enum InboxItemType {
+  COMMENT
+  REPLY
+  MENTION
+  DIRECT_MESSAGE
+}
+
+enum InboxItemStatus {
+  UNREAD
+  READ
+  REPLIED
+  ARCHIVED
+}
+
 // === Core: Agency & Users ===
 
 model Agency {
@@ -145,6 +159,7 @@ model Agency {
   notifications         Notification[]
   notificationPrefs     NotificationPreference[]
   auditLogs             AuditLog[]
+  inboxItems            InboxItem[]
 }
 
 model User {
@@ -279,10 +294,59 @@ model SocialAccount {
   client            Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
   postTargets       PostTarget[]
   analyticsSnapshots AnalyticsSnapshot[]
+  inboxItems        InboxItem[]
 
   @@unique([agencyId, platform, platformUserId])
   @@index([agencyId])
   @@index([agencyId, platform])
+}
+
+// === Social Inbox (comments, mentions, DMs) ===
+
+model InboxItem {
+  id              String          @id @default(cuid())
+  agencyId        String
+  socialAccountId String
+  platform        SocialPlatform
+  type            InboxItemType
+  status          InboxItemStatus @default(UNREAD)
+
+  // Platform identifiers — platformItemId is the comment/message/mention id on
+  // the platform. parentPlatformId threads replies under their parent.
+  platformItemId    String
+  parentPlatformId  String?
+  // The platform post the interaction belongs to (for comments/mentions).
+  platformPostId    String?
+  // Optional link back to our own post if the interaction is on content we published.
+  postId            String?
+
+  // Author of the incoming interaction.
+  authorPlatformId  String?
+  authorName        String?
+  authorUsername    String?
+  authorAvatarUrl   String?
+
+  text            String?
+  permalink       String?
+  // True when the item was authored by the connected account (e.g. our reply),
+  // false for incoming items from the audience.
+  isOutbound      Boolean         @default(false)
+
+  raw             Json            @default("{}")
+  platformCreatedAt DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  agency          Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount   @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  post            Post?           @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@unique([socialAccountId, platformItemId])
+  @@index([agencyId, status])
+  @@index([agencyId, platform])
+  @@index([agencyId, type])
+  @@index([socialAccountId])
+  @@index([parentPlatformId])
 }
 
 // === Posts ===
@@ -308,6 +372,7 @@ model Post {
   media           PostMedia[]
   targets         PostTarget[]
   approvals       PostApproval[]
+  inboxItems      InboxItem[]
 
   @@index([agencyId, status])
   @@index([agencyId, scheduledAt])

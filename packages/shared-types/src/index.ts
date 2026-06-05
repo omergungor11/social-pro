@@ -56,6 +56,61 @@ export enum NotificationType {
   REPORT_READY = "REPORT_READY",
 }
 
+// ---------------------------------------------------------------------------
+// Social Inbox (comments, mentions, DMs)
+// ---------------------------------------------------------------------------
+
+export enum InboxItemType {
+  COMMENT = "COMMENT",
+  REPLY = "REPLY",
+  MENTION = "MENTION",
+  DIRECT_MESSAGE = "DIRECT_MESSAGE",
+}
+
+export enum InboxItemStatus {
+  UNREAD = "UNREAD",
+  READ = "READ",
+  REPLIED = "REPLIED",
+  ARCHIVED = "ARCHIVED",
+}
+
+export interface InboxItem {
+  id: string;
+  socialAccountId: string;
+  platform: SocialPlatform;
+  type: InboxItemType;
+  status: InboxItemStatus;
+  platformItemId: string;
+  parentPlatformId: string | null;
+  platformPostId: string | null;
+  postId: string | null;
+  authorName: string | null;
+  authorUsername: string | null;
+  authorAvatarUrl: string | null;
+  text: string | null;
+  permalink: string | null;
+  isOutbound: boolean;
+  platformCreatedAt: string | null;
+  createdAt: string;
+  // Convenience account info for rendering without an extra lookup.
+  account?: {
+    id: string;
+    platform: SocialPlatform;
+    displayName: string | null;
+    username: string | null;
+    avatarUrl: string | null;
+  };
+  // Threaded replies (populated on the thread endpoint).
+  replies?: InboxItem[];
+}
+
+export interface InboxStats {
+  total: number;
+  unread: number;
+  byPlatform: Array<{ platform: SocialPlatform; total: number; unread: number }>;
+  byType: Array<{ type: InboxItemType; total: number; unread: number }>;
+}
+
 export interface ApiResponse<T> {
   data: T;
   meta?: {
