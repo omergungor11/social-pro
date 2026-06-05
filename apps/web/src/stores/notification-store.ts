@@ -66,7 +66,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     try {
       const response =
         await apiClient.get<PaginatedNotificationsResponse>(
-          "/api/v1/notifications?page=1&limit=20&unreadOnly=false"
+          "/notifications?page=1&limit=20&unreadOnly=false"
         );
       set({ notifications: response.items ?? [] });
     } catch {
@@ -80,7 +80,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     try {
       const response =
         await apiClient.get<UnreadCountResponse>(
-          "/api/v1/notifications/unread-count"
+          "/notifications/unread-count"
         );
       set({ unreadCount: response.count ?? 0 });
     } catch {
@@ -91,7 +91,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   markAsRead: async (id: string): Promise<void> => {
     try {
       await apiClient.patch<Notification>(
-        `/api/v1/notifications/${id}/read`
+        `/notifications/${id}/read`
       );
       set((state) => ({
         notifications: state.notifications.map((n) =>
@@ -106,7 +106,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   markAllAsRead: async (): Promise<void> => {
     try {
-      await apiClient.post("/api/v1/notifications/mark-all-read");
+      await apiClient.post("/notifications/mark-all-read");
       set((state) => ({
         notifications: state.notifications.map((n) => ({
           ...n,

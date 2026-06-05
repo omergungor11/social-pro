@@ -228,7 +228,7 @@ export default function DashboardPage(): React.JSX.Element {
     try {
       const [clientsData, postsData, socialAccountsData, usageData] = await Promise.all([
         apiClient.get<ApiClientsResponse>('/clients').catch(() => null),
-        apiClient.get<ApiPostsResponse>('/posts?status=scheduled&limit=1').catch(() => null),
+        apiClient.get<ApiPostsResponse>('/posts?status=SCHEDULED&limit=1').catch(() => null),
         apiClient.get<ApiSocialAccountsResponse>('/social-accounts').catch(() => null),
         apiClient.get<ApiUsageResponse>('/billing/usage').catch(() => null),
       ]);

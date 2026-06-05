@@ -179,7 +179,7 @@ export default function NotificationPreferencesPage(): React.JSX.Element {
     async function load(): Promise<void> {
       try {
         const response = await apiClient.get<PreferencesResponse>(
-          "/api/v1/notifications/preferences"
+          "/notifications/preferences"
         );
         setPrefMap(preferencesToMap(response.preferences ?? []));
       } catch {
@@ -208,7 +208,7 @@ export default function NotificationPreferencesPage(): React.JSX.Element {
     setIsSaving(true);
     setSaveStatus("idle");
     try {
-      await apiClient.patch("/api/v1/notifications/preferences", {
+      await apiClient.patch("/notifications/preferences", {
         preferences: mapToPreferences(prefMap),
       } as unknown as Record<string, unknown>);
       setSaveStatus("saved");

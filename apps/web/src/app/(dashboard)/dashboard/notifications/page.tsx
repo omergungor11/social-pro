@@ -356,7 +356,7 @@ export default function NotificationsPage(): React.JSX.Element {
     try {
       const unreadOnly = filter === "unread";
       const response = await apiClient.get<PaginatedNotificationsResponse>(
-        `/api/v1/notifications?page=${page}&limit=${LIMIT}&unreadOnly=${unreadOnly}`
+        `/notifications?page=${page}&limit=${LIMIT}&unreadOnly=${unreadOnly}`
       );
       setNotifications(response.items ?? []);
       setTotalPages(response.totalPages ?? 1);
@@ -378,7 +378,7 @@ export default function NotificationsPage(): React.JSX.Element {
 
   async function handleMarkAllRead(): Promise<void> {
     try {
-      await apiClient.post("/api/v1/notifications/mark-all-read");
+      await apiClient.post("/notifications/mark-all-read");
       setNotifications((prev) =>
         prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() }))
       );
@@ -388,7 +388,7 @@ export default function NotificationsPage(): React.JSX.Element {
   }
 
   function handleRead(id: string): void {
-    void apiClient.patch(`/api/v1/notifications/${id}/read`).catch(() => {});
+    void apiClient.patch(`/notifications/${id}/read`).catch(() => {});
     setNotifications((prev) =>
       prev.map((n) =>
         n.id === id ? { ...n, readAt: new Date().toISOString() } : n
