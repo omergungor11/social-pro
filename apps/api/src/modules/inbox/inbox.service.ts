@@ -198,11 +198,15 @@ export class InboxService {
             platformCreatedAt: item.platformCreatedAt ?? null,
             raw: (item.raw ?? {}) as Prisma.InputJsonValue,
           },
-          // Only refresh the mutable text/permalink on re-sync; never resurrect
-          // a read/replied status back to unread.
+          // Refresh mutable display fields on re-sync (text/permalink + author
+          // info, which can backfill once mapping improves); never resurrect a
+          // read/replied status back to unread.
           update: {
             text: item.text ?? null,
             permalink: item.permalink ?? null,
+            authorName: item.authorName ?? null,
+            authorUsername: item.authorUsername ?? null,
+            authorAvatarUrl: item.authorAvatarUrl ?? null,
           },
         });
         if (isNew) created += 1;
