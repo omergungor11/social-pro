@@ -21,9 +21,11 @@ Social Pro — ajanslar icin kapsamli sosyal medya yonetim ve musteri yonetim pa
 
 ## Mevcut Durum
 
-**Progress**: 87/87 task (%100) — Tum phase'lar tamamlandi. Ek ozellikler ekleniyor.
+**Progress**: 87/87 task (%100) — Tum phase'lar tamamlandi. Canlida (Render+Neon+Upstash+R2) yayinda; ek ozellikler ekleniyor.
 
-**Son eklenenler** (Session 5): Prisma seed data, frontend sayfalarin API entegrasyonu (clients, posts, analytics, billing, dashboard).
+**Son eklenenler** (2026-06-06): Canli ucretsiz hosting (Render/Neon/Upstash/R2), Unified Inbox (Comments), gercek DM entegrasyonu (IG/FB — Page id ile), Messages sayfasi (platform kanallari), TikTok inbox/publisher/messages, gercek analitik grafikler + gunluk snapshot (Recharts). Brands workspace eklendi sonra UI'dan kaldirildi (backend dormant).
+
+**Siradaki**: Hesap baglayip analitik grafikleri canlida doldur; FB reconnect (Messenger DM); Buffer benzeri eksikler (best-time-to-post, reply→post, link-in-bio).
 
 > Her yeni session'da `sp-tasks/task-index.md` oku veya `/cold-start` calistir.
 

@@ -1,5 +1,39 @@
 # Session Notes
 
+## 2026-06-06 — Session: Canlı hosting + Unified Inbox/DM/Messages + Analitik grafikler
+
+### Completed
+- [x] **Canlı ücretsiz hosting** stabil: Render (API+Web) + Neon (Postgres) + Upstash (Redis, TLS) + Cloudflare R2 (medya). Login canlıda çalışıyor, API health ~0.15s
+- [x] **Dashboard/Posts/Analytics fix**: stat sayaçları (getWithMeta + meta.total), posts publishing status, analytics overview gerçek veri, duplicate sayfa temizliği
+- [x] **Auto-sync on connect**: hesap bağlanınca postlar otomatik çekiliyor
+- [x] **Unified Inbox (Comments)**: InboxItem modeli + migration, sync/list/thread/reply/stats, 4 platform adapter (IG/FB yorum+reply, Twitter mention+reply, LinkedIn gated). Canlıda 4 IG yorumu doğrulandı
+- [x] **DM entegrasyonu (IG/FB)**: messaging scope'ları + auth_type=rerequest, Conversations API, webhook DM storage, Send API reply. **Kök neden bulundu**: IG konuşmaları Page id ile çekilmeli (IG user id #3 hatası verir) — düzeltildi, canlıda DM'ler geliyor
+- [x] **Messages sayfası**: DM'e özel messenger-tarzı sayfa, platform kanalları (IG Direct / FB Messenger / X DM / LinkedIn / TikTok DM — gated olanlar dürüst "access not enabled")
+- [x] **TikTok her yere**: inbox adapter (gated), publisher (Content Posting API video), Messages kanalı
+- [x] **Analitik grafikler + günlük snapshot**: snapshot fetcher şifreli-token bug'ı düzeltildi (artık DB'den gerçek değer), `/analytics/timeseries` endpoint, 14-gün baseline backfill, gerçek deltalar, Recharts area/line grafikler
+- [x] **Brands workspace** eklendi sonra **kaldırıldı** (kullanıcı isteği): UI'dan tamamen çıkarıldı, backend Client/clientId dormant bırakıldı
+
+### Yarım Kalan / Bekleyen
+- [ ] **Analitik grafiklerini canlıda dolu görmek** için en az 1 sosyal hesap bağlı olmalı — şu an 0 hesap bağlı (disconnect olunca snapshot'lar cascade silindi). Hesap bağlanınca `/analytics/snapshot` tetikle → grafikler dolar
+- [ ] **Facebook'u yeniden bağla** → Messenger DM'leri aktif olsun (şu an sadece IG DM test edildi)
+- [ ] Twitter/LinkedIn OAuth redirect URI'leri dev console'a eklenmeli (bağlanacaksa)
+- [ ] Outbound DM'lerin thread'de sağda görünmesi için Messages listesinin çift-yön mesaj çekmesi iyileştirilebilir
+
+### Sonraki Session
+- [ ] Bir hesap bağla → snapshot tetikle → analitik grafikleri canlıda doğrula/göster
+- [ ] Buffer benzeri eksikler (onaya göre): best-time-to-post, reply→post, start page (link-in-bio)
+- [ ] Facebook Meta App Review (DM + engagement tam erişim için)
+
+### Dikkat Edilecekler
+- **Brands UI yok** ama backend Client/clientId filtreleri dormant duruyor — referans verme, gerekirse yeniden kurgula
+- **IG DM**: konuşmalar **Page id** üzerinden (`/me` ile çözülüyor), IG user id değil
+- **Snapshot job**: BullMQ cron 6 saatte bir; değerler DB'den (overview ile tutarlı), günde 1 satır/metrik (upsert)
+- API pre-existing typecheck hataları (report.service JSON-null, tenant, test/setup) kronik — build tolere ediyor
+- ENCRYPTION_KEY güçlü anahtar Render'da; eski token'lar decrypt olmaz → hesap değişince yeniden bağla
+- Render free-tier cold start ~20-50s (ilk istek), sonra hızlı
+
+---
+
 ## 2026-03-22 — Session 5
 
 ### Completed
