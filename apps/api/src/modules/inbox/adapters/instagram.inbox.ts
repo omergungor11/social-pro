@@ -208,14 +208,26 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
 
       for (const conv of data.data ?? []) {
         // Map participant id -> username so each message can show a sender name
-        // (the message `from` sometimes carries only an id).
+        // (the message `from` sometimes carries only an Instagram-scoped id).
+        const participants = conv.participants?.data ?? [];
         const participantById = new Map<string, Participant>();
-        for (const part of conv.participants?.data ?? []) {
+        for (const part of participants) {
           if (part.id) participantById.set(part.id, part);
         }
+        // The other side of a 1:1 thread — used as a last-resort sender name
+        // for inbound messages whose `from` lacks a username.
+        const counterparty = participants.find(
+          (p) => p.id !== account.platformUserId,
+        );
+
         for (const m of conv.messages?.data ?? []) {
+          const isOutbound = m.from?.id === account.platformUserId;
           const part = m.from?.id ? participantById.get(m.from.id) : undefined;
-          const username = m.from?.username ?? part?.username ?? null;
+          const username =
+            m.from?.username ??
+            part?.username ??
+            (isOutbound ? account.platformUsername : counterparty?.username) ??
+            null;
           items.push({
             platformItemId: m.id,
             type: "DIRECT_MESSAGE",
@@ -224,7 +236,7 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
             authorUsername: username,
             authorName: m.from?.name ?? part?.name ?? username,
             text: m.message ?? null,
-            isOutbound: m.from?.id === account.platformUserId,
+            isOutbound,
             platformCreatedAt: m.created_time
               ? new Date(m.created_time)
               : null,
