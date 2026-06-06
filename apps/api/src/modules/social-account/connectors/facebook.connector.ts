@@ -37,10 +37,13 @@ export class FacebookConnector implements OAuthConnector {
     redirectUri: string,
     credentials: OAuthCredentials,
   ): string {
-    const effectiveScopes =
+    const baseScopes =
       credentials.scopes && credentials.scopes.length > 0
         ? credentials.scopes
         : this.scopes;
+    // Always include pages_messaging so DM access can be granted even when the
+    // stored OAuth config predates it.
+    const effectiveScopes = Array.from(new Set([...baseScopes, "pages_messaging"]));
 
     const params = new URLSearchParams({
       client_id: credentials.clientId,
@@ -48,6 +51,9 @@ export class FacebookConnector implements OAuthConnector {
       scope: effectiveScopes.join(","),
       state,
       response_type: "code",
+      // Force the consent screen to re-appear so newly added permissions (DM)
+      // are actually prompted — Facebook silently skips re-auth otherwise.
+      auth_type: "rerequest",
     });
 
     return `${this.authUrl}?${params.toString()}`;

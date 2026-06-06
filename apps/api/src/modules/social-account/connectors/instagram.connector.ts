@@ -39,10 +39,15 @@ export class InstagramConnector implements OAuthConnector {
     redirectUri: string,
     credentials: OAuthCredentials,
   ): string {
-    const effectiveScopes =
+    const baseScopes =
       credentials.scopes && credentials.scopes.length > 0
         ? credentials.scopes
         : this.scopes;
+    // Always include instagram_manage_messages so DM access can be granted even
+    // when the stored OAuth config predates it.
+    const effectiveScopes = Array.from(
+      new Set([...baseScopes, "instagram_manage_messages"]),
+    );
 
     const params = new URLSearchParams({
       client_id: credentials.clientId,
@@ -50,6 +55,8 @@ export class InstagramConnector implements OAuthConnector {
       scope: effectiveScopes.join(","),
       state,
       response_type: "code",
+      // Force re-consent so newly added DM permissions are actually prompted.
+      auth_type: "rerequest",
     });
 
     return `${this.authUrl}?${params.toString()}`;
