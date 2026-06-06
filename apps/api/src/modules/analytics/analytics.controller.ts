@@ -20,8 +20,10 @@ import {
 import { CurrentAgency } from "../common/decorators/current-agency.decorator";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { AnalyticsAggregationService } from "./services/analytics-aggregation.service";
+import { AnalyticsFetcherService } from "./services/analytics-fetcher.service";
 import { ReportService } from "./services/report.service";
 import { AnalyticsQueryDto } from "./dto/analytics-query.dto";
+import { TimeSeriesQueryDto } from "./dto/timeseries-query.dto";
 import { CreateReportDto } from "./dto/create-report.dto";
 
 @ApiTags("Analytics")
@@ -31,6 +33,7 @@ import { CreateReportDto } from "./dto/create-report.dto";
 export class AnalyticsController {
   constructor(
     private readonly aggregation: AnalyticsAggregationService,
+    private readonly fetcher: AnalyticsFetcherService,
     private readonly reportService: ReportService
   ) {}
 
@@ -56,6 +59,50 @@ export class AnalyticsController {
       endDate: query.endDate,
       clientId: query.clientId,
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Agency/brand time series
+  // ---------------------------------------------------------------------------
+
+  @Get("timeseries")
+  @ApiOperation({
+    summary: "Get agency time series",
+    description:
+      "Returns one point per day for FOLLOWERS, IMPRESSIONS, or ENGAGEMENT " +
+      "across the agency's accounts, optionally scoped to a client/date range.",
+  })
+  @ApiResponse({ status: 200, description: "Time series retrieved" })
+  @ApiResponse({ status: 400, description: "Validation error" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  async getTimeSeries(
+    @CurrentAgency() agencyId: string,
+    @Query() query: TimeSeriesQueryDto
+  ) {
+    return this.aggregation.getTimeSeries(agencyId, {
+      metric: query.metric,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      clientId: query.clientId,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Snapshot now
+  // ---------------------------------------------------------------------------
+
+  @Post("snapshot")
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: "Snapshot analytics now",
+    description:
+      "Immediately computes and persists analytics snapshots for the agency's " +
+      "active accounts so charts have a fresh data point.",
+  })
+  @ApiResponse({ status: 201, description: "Snapshot triggered" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  async snapshotNow(@CurrentAgency() agencyId: string) {
+    return this.fetcher.snapshotAgencyNow(agencyId);
   }
 
   // ---------------------------------------------------------------------------

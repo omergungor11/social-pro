@@ -1,5 +1,10 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { AnalyticsSnapshot, MetricType, SocialPlatform } from "@social-pro/prisma";
+import {
+  AnalyticsSnapshot,
+  MetricType,
+  Prisma,
+  SocialPlatform,
+} from "@social-pro/prisma";
 import { PrismaService } from "../../common/prisma/prisma.service";
 
 // ---------------------------------------------------------------------------
@@ -40,6 +45,40 @@ export class AnalyticsFetcherService {
   constructor(private readonly prisma: PrismaService) {}
 
   // ---------------------------------------------------------------------------
+  // On-demand snapshot for an agency
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Snapshots all active accounts for an agency immediately (best-effort) so
+   * charts have a data point without waiting for the 6h cron.
+   */
+  async snapshotAgencyNow(agencyId: string): Promise<{ snapshotted: number }> {
+    const accounts = await this.prisma.socialAccount.findMany({
+      where: { agencyId, isActive: true },
+      select: { id: true },
+    });
+
+    if (accounts.length === 0) return { snapshotted: 0 };
+
+    const results = await Promise.allSettled(
+      accounts.map((a) => this.fetchAccountMetrics(a.id))
+    );
+
+    const snapshotted = results.filter(
+      (r) => r.status === "fulfilled"
+    ).length;
+
+    const failed = results.length - snapshotted;
+    if (failed > 0) {
+      this.logger.warn(
+        `snapshotAgencyNow agencyId=${agencyId}: ${snapshotted} ok, ${failed} failed`
+      );
+    }
+
+    return { snapshotted };
+  }
+
+  // ---------------------------------------------------------------------------
   // Fetch account-level metrics
   // ---------------------------------------------------------------------------
 
@@ -53,14 +92,10 @@ export class AnalyticsFetcherService {
     }
 
     this.logger.log(
-      `Fetching account metrics: accountId=${accountId} platform=${account.platform}`
+      `Computing account metrics: accountId=${accountId} platform=${account.platform}`
     );
 
-    const metrics = await this.callPlatformAccountApi(
-      account.platform,
-      account.platformUserId,
-      account.accessToken
-    );
+    const metrics = await this.computeAccountMetricsFromDb(accountId, account.metadata);
 
     const periodEnd = new Date();
     const periodStart = new Date(
@@ -69,43 +104,31 @@ export class AnalyticsFetcherService {
       periodEnd.getDate()
     );
 
-    const snapshotData: Array<{
-      socialAccountId: string;
-      metricType: MetricType;
-      value: bigint;
-      periodStart: Date;
-      periodEnd: Date;
-      rawData: Record<string, unknown>;
-    }> = [
+    const rawData: Prisma.InputJsonValue = {
+      followers: metrics.followers,
+      engagementRate: metrics.engagementRate,
+      impressions: metrics.impressions,
+    };
+
+    const entries: Array<{ metricType: MetricType; value: bigint }> = [
+      { metricType: MetricType.FOLLOWERS, value: BigInt(metrics.followers) },
       {
-        socialAccountId: accountId,
-        metricType: MetricType.FOLLOWERS,
-        value: BigInt(metrics.followers),
-        periodStart,
-        periodEnd,
-        rawData: metrics as unknown as Record<string, unknown>,
-      },
-      {
-        socialAccountId: accountId,
         metricType: MetricType.ENGAGEMENT,
         value: BigInt(Math.round(metrics.engagementRate * 100)),
-        periodStart,
-        periodEnd,
-        rawData: metrics as unknown as Record<string, unknown>,
       },
-      {
-        socialAccountId: accountId,
-        metricType: MetricType.IMPRESSIONS,
-        value: BigInt(metrics.impressions),
-        periodStart,
-        periodEnd,
-        rawData: metrics as unknown as Record<string, unknown>,
-      },
+      { metricType: MetricType.IMPRESSIONS, value: BigInt(metrics.impressions) },
     ];
 
-    const snapshots = await this.prisma.$transaction(
-      snapshotData.map((d) =>
-        this.prisma.analyticsSnapshot.create({ data: d })
+    const snapshots = await Promise.all(
+      entries.map(({ metricType, value }) =>
+        this.upsertDailySnapshot(
+          accountId,
+          metricType,
+          value,
+          periodStart,
+          periodEnd,
+          rawData
+        )
       )
     );
 
@@ -120,6 +143,91 @@ export class AnalyticsFetcherService {
     );
 
     return snapshots;
+  }
+
+  /**
+   * Computes the three account-level metrics from the database, mirroring the
+   * derivation used by SocialAccountService.listAccounts / overview:
+   *  - followers   = metadata.followersCount
+   *  - impressions = sum of platformSpecificContent.impressions across targets
+   *  - engagement  = (avgInteractionsPerPost / followers) * 100
+   */
+  private async computeAccountMetricsFromDb(
+    accountId: string,
+    metadata: Prisma.JsonValue
+  ): Promise<PlatformAccountMetrics> {
+    const meta =
+      metadata != null && typeof metadata === "object"
+        ? (metadata as Record<string, unknown>)
+        : {};
+    const followers =
+      typeof meta["followersCount"] === "number" ? meta["followersCount"] : 0;
+
+    const targets = await this.prisma.postTarget.findMany({
+      where: { socialAccountId: accountId },
+      select: { platformSpecificContent: true },
+    });
+
+    let posts = 0;
+    let likes = 0;
+    let comments = 0;
+    let impressions = 0;
+    for (const t of targets) {
+      const psc =
+        t.platformSpecificContent != null &&
+        typeof t.platformSpecificContent === "object"
+          ? (t.platformSpecificContent as Record<string, unknown>)
+          : {};
+      posts += 1;
+      likes += typeof psc["likes"] === "number" ? psc["likes"] : 0;
+      comments += typeof psc["comments"] === "number" ? psc["comments"] : 0;
+      impressions +=
+        typeof psc["impressions"] === "number" ? psc["impressions"] : 0;
+    }
+
+    const avgInteractionsPerPost =
+      posts > 0 ? (likes + comments) / posts : 0;
+    const engagementRate =
+      followers > 0 ? (avgInteractionsPerPost / followers) * 100 : 0;
+
+    return { followers, engagementRate, impressions };
+  }
+
+  /**
+   * Keeps a single snapshot per (account, metric, day): updates the existing
+   * row's value + fetchedAt when present, otherwise creates a new one. This
+   * prevents the 6h cron from accumulating four rows per metric per day.
+   */
+  private async upsertDailySnapshot(
+    socialAccountId: string,
+    metricType: MetricType,
+    value: bigint,
+    periodStart: Date,
+    periodEnd: Date,
+    rawData: Prisma.InputJsonValue
+  ): Promise<AnalyticsSnapshot> {
+    const existing = await this.prisma.analyticsSnapshot.findFirst({
+      where: { socialAccountId, postTargetId: null, metricType, periodStart },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return this.prisma.analyticsSnapshot.update({
+        where: { id: existing.id },
+        data: { value, periodEnd, rawData, fetchedAt: new Date() },
+      });
+    }
+
+    return this.prisma.analyticsSnapshot.create({
+      data: {
+        socialAccountId,
+        metricType,
+        value,
+        periodStart,
+        periodEnd,
+        rawData,
+      },
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -177,7 +285,7 @@ export class AnalyticsFetcherService {
             value: BigInt(value),
             periodStart,
             periodEnd,
-            rawData: metrics as unknown as Record<string, unknown>,
+            rawData: metrics as unknown as Prisma.InputJsonValue,
           },
         })
       )
@@ -193,93 +301,6 @@ export class AnalyticsFetcherService {
   // ---------------------------------------------------------------------------
   // Platform API stub helpers
   // ---------------------------------------------------------------------------
-
-  /**
-   * Calls the relevant platform API to retrieve account-level metrics.
-   * Replace the stub bodies with actual SDK/HTTP calls when real credentials
-   * and platform API integrations are wired up.
-   */
-  private async callPlatformAccountApi(
-    platform: SocialPlatform,
-    platformUserId: string,
-    accessToken: string
-  ): Promise<PlatformAccountMetrics> {
-    this.logger.debug(
-      `callPlatformAccountApi: platform=${platform} platformUserId=${platformUserId}`
-    );
-
-    if (platform === SocialPlatform.INSTAGRAM) {
-      try {
-        const url =
-          `https://graph.facebook.com/v22.0/${platformUserId}` +
-          `?fields=followers_count,media_count` +
-          `&access_token=${accessToken}`;
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = (await response.json()) as {
-            followers_count?: number;
-            media_count?: number;
-          };
-          return {
-            followers: data.followers_count ?? 0,
-            engagementRate: 0,
-            impressions: 0,
-          };
-        }
-        this.logger.warn(`Instagram metrics fetch failed: ${response.status}`);
-      } catch (err) {
-        this.logger.warn(`Instagram metrics API error: ${String(err)}`);
-      }
-    }
-
-    if (platform === SocialPlatform.FACEBOOK) {
-      try {
-        const url =
-          `https://graph.facebook.com/v22.0/${platformUserId}` +
-          `?fields=followers_count,fan_count` +
-          `&access_token=${accessToken}`;
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = (await response.json()) as {
-            followers_count?: number;
-            fan_count?: number;
-          };
-          return {
-            followers: data.followers_count ?? data.fan_count ?? 0,
-            engagementRate: 0,
-            impressions: 0,
-          };
-        }
-        this.logger.warn(`Facebook metrics fetch failed: ${response.status}`);
-      } catch (err) {
-        this.logger.warn(`Facebook metrics API error: ${String(err)}`);
-      }
-    }
-
-    if (platform === SocialPlatform.TWITTER) {
-      try {
-        const response = await fetch(
-          `https://api.twitter.com/2/users/${platformUserId}?user.fields=public_metrics`,
-          { headers: { Authorization: `Bearer ${accessToken}` } },
-        );
-        if (response.ok) {
-          const json = (await response.json()) as {
-            data?: { public_metrics?: { followers_count?: number } };
-          };
-          return {
-            followers: json.data?.public_metrics?.followers_count ?? 0,
-            engagementRate: 0,
-            impressions: 0,
-          };
-        }
-        this.logger.warn(`Twitter metrics fetch failed: ${response.status}`);
-      } catch (err) {
-        this.logger.warn(`Twitter metrics API error: ${String(err)}`);
-      }
-    }
-
-    return { followers: 0, engagementRate: 0, impressions: 0 };
-  }
 
   /**
    * Calls the relevant platform API to retrieve post-level metrics.

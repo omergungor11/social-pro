@@ -4,6 +4,7 @@ import * as React from 'react';
 import {
   TrendingUp,
   TrendingDown,
+  Minus,
   Users,
   BarChart3,
   Eye,
@@ -13,7 +14,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import {
@@ -28,6 +29,7 @@ import { PlatformIcon, type Platform } from '@/components/social/platform-icon';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
 import { useBrandStore } from '@/stores/brand-store';
+import { TimeSeriesChart } from '@/components/analytics/time-series-chart';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,8 +169,11 @@ function DateRangeTabs({ value, onChange }: DateRangeTabsProps): React.JSX.Eleme
 
 function MetricCard({ metric }: { metric: OverviewMetric }): React.JSX.Element {
   const Icon = metric.icon;
-  const isPositive = metric.change >= 0;
-  const TrendIcon = isPositive ? TrendingUp : TrendingDown;
+  const isNeutral = metric.change === 0;
+  const isPositive = metric.change > 0;
+  const TrendIcon = isNeutral ? Minus : isPositive ? TrendingUp : TrendingDown;
+  const trendIconColor = isNeutral ? 'text-slate-400' : isPositive ? 'text-emerald-500' : 'text-red-500';
+  const trendTextColor = isNeutral ? 'text-slate-500' : isPositive ? 'text-emerald-600' : 'text-red-600';
 
   return (
     <Card className="overflow-hidden">
@@ -179,57 +184,16 @@ function MetricCard({ metric }: { metric: OverviewMetric }): React.JSX.Element {
             <p className="text-3xl font-bold text-slate-900 tracking-tight">{metric.value}</p>
             <div className="flex items-center gap-1">
               <TrendIcon
-                className={cn('h-3.5 w-3.5 shrink-0', isPositive ? 'text-emerald-500' : 'text-red-500')}
+                className={cn('h-3.5 w-3.5 shrink-0', trendIconColor)}
                 aria-hidden="true"
               />
-              <span
-                className={cn(
-                  'text-xs font-medium',
-                  isPositive ? 'text-emerald-600' : 'text-red-600'
-                )}
-              >
+              <span className={cn('text-xs font-medium', trendTextColor)}>
                 {isPositive ? '+' : ''}{metric.change}% vs prev period
               </span>
             </div>
           </div>
           <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-xl', metric.iconBg)}>
             <Icon className={cn('h-5 w-5', metric.iconColor)} aria-hidden="true" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-interface ChartPlaceholderProps {
-  title: string;
-  description: string;
-  mockNumbers: string[];
-}
-
-function ChartPlaceholder({ title, description, mockNumbers }: ChartPlaceholderProps): React.JSX.Element {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-semibold text-slate-800">{title}</CardTitle>
-          <Badge variant="default">Preview</Badge>
-        </div>
-        <p className="text-xs text-slate-400">{description}</p>
-      </CardHeader>
-      <CardContent>
-        <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-8">
-          <div className="flex flex-col items-center justify-center text-center space-y-3">
-            <BarChart3 className="h-10 w-10 text-slate-300" aria-hidden="true" />
-            <p className="text-sm font-medium text-slate-500">Chart: {title}</p>
-            <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
-              {mockNumbers.map((n) => (
-                <span key={n} className="text-xs text-slate-400 tabular-nums">{n}</span>
-              ))}
-            </div>
-            <p className="text-xs text-slate-400">
-              Recharts integration coming in next phase
-            </p>
           </div>
         </div>
       </CardContent>
@@ -373,6 +337,8 @@ export default function AnalyticsPage(): React.JSX.Element {
     setDateRange(range);
   };
 
+  const chartRange = dateRange === 'custom' ? getRangeDate('30d') : getRangeDate(dateRange);
+
   return (
     <div className="space-y-8">
       {/* Page header */}
@@ -448,15 +414,28 @@ export default function AnalyticsPage(): React.JSX.Element {
 
           {/* Charts */}
           <div className="grid gap-6 lg:grid-cols-2">
-            <ChartPlaceholder
+            <TimeSeriesChart
               title="Follower Growth"
-              description="Cumulative followers across all platforms"
-              mockNumbers={['Fetched from /analytics/overview', 'Recharts integration pending']}
+              description="Total followers across all platforms"
+              metric="FOLLOWERS"
+              kind="area"
+              startDate={chartRange.startDate}
+              endDate={chartRange.endDate}
+              clientId={selectedBrandId}
+              emptyMessage="Collecting data — this chart fills in as snapshots accumulate"
+              color="#2563eb"
             />
-            <ChartPlaceholder
+            <TimeSeriesChart
               title="Engagement Rate"
               description="Average engagement rate per day"
-              mockNumbers={['Fetched from /analytics/overview', 'Recharts integration pending']}
+              metric="ENGAGEMENT"
+              kind="line"
+              startDate={chartRange.startDate}
+              endDate={chartRange.endDate}
+              clientId={selectedBrandId}
+              percent
+              emptyMessage="No published posts in this range"
+              color="#7c3aed"
             />
           </div>
 

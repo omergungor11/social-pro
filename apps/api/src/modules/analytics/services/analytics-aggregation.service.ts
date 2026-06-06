@@ -6,6 +6,7 @@ import {
   SocialPlatform,
 } from "@social-pro/prisma";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { TimeSeriesMetric } from "../dto/timeseries-query.dto";
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -69,6 +70,18 @@ export interface DateRange {
   startDate?: string;
   endDate?: string;
   clientId?: string;
+}
+
+export interface TimeSeriesQuery {
+  metric: TimeSeriesMetric;
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+}
+
+export interface TimeSeriesDatum {
+  date: string;
+  value: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,23 +261,189 @@ export class AnalyticsAggregationService {
       .slice(0, 5)
       .map(({ score: _score, ...rest }) => rest);
 
+    // --- Deltas (period-over-period) ---------------------------------------
+    const followerChange = await this.computeFollowerChange(
+      accountIds,
+      totalFollowers,
+      dateRange
+    );
+
+    const { impressionChange, engagementRateChange } =
+      await this.computePostBucketDeltas(accountIds, dateRange);
+
     this.logger.debug(
       `Overview agencyId=${agencyId} accounts=${accountCount} followers=${totalFollowers}`
     );
 
     return {
       totalFollowers,
-      followerChange: 0,
+      followerChange,
       engagementRate,
-      engagementRateChange: 0,
+      engagementRateChange,
       totalImpressions,
-      impressionChange: 0,
+      impressionChange,
       postsPublished,
       postsChange: 0,
       accountCount,
       platformBreakdown,
       topPosts,
     };
+  }
+
+  /**
+   * Follower delta: % change between the current total and the earliest
+   * FOLLOWERS snapshot total within the range (one latest snapshot per account
+   * per day, summed across accounts). Falls back to the snapshot total just
+   * before the range start when no in-range baseline exists. Returns 0 when
+   * fewer than two distinct data points are available.
+   */
+  private async computeFollowerChange(
+    accountIds: string[],
+    currentTotal: number,
+    dateRange: DateRange
+  ): Promise<number> {
+    if (accountIds.length === 0) return 0;
+
+    const start = dateRange.startDate ? new Date(dateRange.startDate) : null;
+    const end = dateRange.endDate ? new Date(dateRange.endDate) : null;
+
+    const snapshots = await this.prisma.analyticsSnapshot.findMany({
+      where: {
+        socialAccountId: { in: accountIds },
+        metricType: MetricType.FOLLOWERS,
+        postTargetId: null,
+        ...(start || end
+          ? {
+              periodStart: {
+                ...(start ? { gte: start } : {}),
+                ...(end ? { lte: end } : {}),
+              },
+            }
+          : {}),
+      },
+      select: { socialAccountId: true, periodStart: true, value: true },
+      orderBy: { periodStart: "asc" },
+    });
+
+    if (snapshots.length === 0) return 0;
+
+    const days = new Set(
+      snapshots.map((s) => this.dayKey(s.periodStart))
+    );
+    if (days.size < 2) return 0;
+
+    const earliestDay = this.dayKey(snapshots[0]!.periodStart);
+    const latestByAccount = new Map<string, number>();
+    for (const s of snapshots) {
+      if (this.dayKey(s.periodStart) === earliestDay) {
+        latestByAccount.set(s.socialAccountId, Number(s.value));
+      }
+    }
+
+    let baseline = 0;
+    for (const v of latestByAccount.values()) baseline += v;
+
+    if (baseline <= 0) return 0;
+    return this.percentChange(baseline, currentTotal);
+  }
+
+  /**
+   * Impression + engagement deltas computed from post targets bucketed by the
+   * post's publishedAt day — this range vs the previous equal-length range.
+   * Returns 0 for either metric when there is insufficient history.
+   */
+  private async computePostBucketDeltas(
+    accountIds: string[],
+    dateRange: DateRange
+  ): Promise<{ impressionChange: number; engagementRateChange: number }> {
+    if (accountIds.length === 0) {
+      return { impressionChange: 0, engagementRateChange: 0 };
+    }
+
+    const end = dateRange.endDate ? new Date(dateRange.endDate) : new Date();
+    const start = dateRange.startDate
+      ? new Date(dateRange.startDate)
+      : new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const spanMs = end.getTime() - start.getTime();
+    if (spanMs <= 0) return { impressionChange: 0, engagementRateChange: 0 };
+
+    const prevStart = new Date(start.getTime() - spanMs);
+    const prevEnd = start;
+
+    const [current, previous] = await Promise.all([
+      this.postWindowAgg(accountIds, start, end),
+      this.postWindowAgg(accountIds, prevStart, prevEnd),
+    ]);
+
+    if (current.posts === 0 && previous.posts === 0) {
+      return { impressionChange: 0, engagementRateChange: 0 };
+    }
+
+    const impressionChange = this.percentChange(
+      previous.impressions,
+      current.impressions
+    );
+
+    const curEngagement = this.engagementForWindow(current);
+    const prevEngagement = this.engagementForWindow(previous);
+    const engagementRateChange = this.percentChange(
+      prevEngagement,
+      curEngagement
+    );
+
+    return { impressionChange, engagementRateChange };
+  }
+
+  private async postWindowAgg(
+    accountIds: string[],
+    start: Date,
+    end: Date
+  ): Promise<{
+    posts: number;
+    likes: number;
+    comments: number;
+    impressions: number;
+  }> {
+    const targets = await this.prisma.postTarget.findMany({
+      where: {
+        socialAccountId: { in: accountIds },
+        publishedAt: { gte: start, lt: end },
+      },
+      select: { platformSpecificContent: true },
+    });
+
+    let posts = 0;
+    let likes = 0;
+    let comments = 0;
+    let impressions = 0;
+    for (const t of targets) {
+      const psc = this.asMetricMap(t.platformSpecificContent);
+      posts += 1;
+      likes += this.numField(psc, "likes");
+      comments += this.numField(psc, "comments");
+      impressions += this.numField(psc, "impressions");
+    }
+    return { posts, likes, comments, impressions };
+  }
+
+  /**
+   * Engagement for a window: interactions ÷ impressions × 100. Falls back to 0
+   * when there are no impressions (avoids divide-by-zero).
+   */
+  private engagementForWindow(window: {
+    likes: number;
+    comments: number;
+    impressions: number;
+  }): number {
+    if (window.impressions <= 0) return 0;
+    const rate =
+      ((window.likes + window.comments) / window.impressions) * 100;
+    return Number(rate.toFixed(2));
+  }
+
+  private dayKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
   }
 
   private emptyOverview(): OverviewMetrics {
@@ -345,6 +524,127 @@ export class AnalyticsAggregationService {
     });
 
     return snapshots.map((s) => this.snapshotToTimePoint(s));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Agency/brand time series
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns one point per day (ascending) for the agency's accounts:
+   *  - FOLLOWERS: from snapshots — latest snapshot per account per day, summed.
+   *  - IMPRESSIONS: from post targets bucketed by publishedAt day — summed.
+   *  - ENGAGEMENT: from the same buckets — interactions ÷ impressions × 100.
+   */
+  async getTimeSeries(
+    agencyId: string,
+    query: TimeSeriesQuery
+  ): Promise<TimeSeriesDatum[]> {
+    const accounts = await this.prisma.socialAccount.findMany({
+      where: {
+        agencyId,
+        ...(query.clientId ? { clientId: query.clientId } : {}),
+      },
+      select: { id: true },
+    });
+    const accountIds = accounts.map((a) => a.id);
+    if (accountIds.length === 0) return [];
+
+    const start = query.startDate ? new Date(query.startDate) : null;
+    const end = query.endDate ? new Date(query.endDate) : null;
+
+    if (query.metric === "FOLLOWERS") {
+      return this.followersTimeSeries(accountIds, start, end);
+    }
+    return this.postBucketTimeSeries(accountIds, query.metric, start, end);
+  }
+
+  private async followersTimeSeries(
+    accountIds: string[],
+    start: Date | null,
+    end: Date | null
+  ): Promise<TimeSeriesDatum[]> {
+    const snapshots = await this.prisma.analyticsSnapshot.findMany({
+      where: {
+        socialAccountId: { in: accountIds },
+        metricType: MetricType.FOLLOWERS,
+        postTargetId: null,
+        ...(start || end
+          ? {
+              periodStart: {
+                ...(start ? { gte: start } : {}),
+                ...(end ? { lte: end } : {}),
+              },
+            }
+          : {}),
+      },
+      select: { socialAccountId: true, periodStart: true, value: true },
+      orderBy: { periodStart: "asc" },
+    });
+
+    // For each (day, account) keep the latest value, then sum per day.
+    const perDayAccount = new Map<string, Map<string, number>>();
+    for (const s of snapshots) {
+      const day = this.dayKey(s.periodStart);
+      const byAccount = perDayAccount.get(day) ?? new Map<string, number>();
+      byAccount.set(s.socialAccountId, Number(s.value));
+      perDayAccount.set(day, byAccount);
+    }
+
+    return [...perDayAccount.entries()]
+      .map(([date, byAccount]) => {
+        let value = 0;
+        for (const v of byAccount.values()) value += v;
+        return { date, value };
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
+
+  private async postBucketTimeSeries(
+    accountIds: string[],
+    metric: TimeSeriesMetric,
+    start: Date | null,
+    end: Date | null
+  ): Promise<TimeSeriesDatum[]> {
+    const targets = await this.prisma.postTarget.findMany({
+      where: {
+        socialAccountId: { in: accountIds },
+        publishedAt: {
+          not: null,
+          ...(start ? { gte: start } : {}),
+          ...(end ? { lte: end } : {}),
+        },
+      },
+      select: { publishedAt: true, platformSpecificContent: true },
+    });
+
+    interface Bucket {
+      likes: number;
+      comments: number;
+      impressions: number;
+    }
+    const byDay = new Map<string, Bucket>();
+    for (const t of targets) {
+      if (t.publishedAt == null) continue;
+      const day = this.dayKey(t.publishedAt);
+      const bucket =
+        byDay.get(day) ?? { likes: 0, comments: 0, impressions: 0 };
+      const psc = this.asMetricMap(t.platformSpecificContent);
+      bucket.likes += this.numField(psc, "likes");
+      bucket.comments += this.numField(psc, "comments");
+      bucket.impressions += this.numField(psc, "impressions");
+      byDay.set(day, bucket);
+    }
+
+    return [...byDay.entries()]
+      .map(([date, bucket]) => {
+        const value =
+          metric === "IMPRESSIONS"
+            ? bucket.impressions
+            : this.engagementForWindow(bucket);
+        return { date, value };
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
 
   // ---------------------------------------------------------------------------

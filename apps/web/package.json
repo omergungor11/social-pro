@@ -14,18 +14,19 @@
     "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
-    "next": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
     "@social-pro/shared-types": "workspace:*",
     "@social-pro/ui": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.8.1",
+    "socket.io-client": "^4.8.0",
     "tailwind-merge": "^2.5.5",
     "zod": "^3.24.0",
-    "zustand": "^5.0.0",
-    "socket.io-client": "^4.8.0"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
