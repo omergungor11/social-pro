@@ -553,21 +553,35 @@ export class AnalyticsAggregationService {
     const start = query.startDate ? new Date(query.startDate) : null;
     const end = query.endDate ? new Date(query.endDate) : null;
 
-    if (query.metric === "FOLLOWERS") {
-      return this.followersTimeSeries(accountIds, start, end);
+    // All three metrics come from the daily account snapshots so the charts are
+    // consistent and fill in day-by-day (Buffer-style). FOLLOWERS/IMPRESSIONS
+    // sum across the brand's accounts; ENGAGEMENT (stored as rate×100) averages.
+    if (query.metric === "IMPRESSIONS") {
+      return this.snapshotTimeSeries(accountIds, MetricType.IMPRESSIONS, start, end, "sum", 1);
     }
-    return this.postBucketTimeSeries(accountIds, query.metric, start, end);
+    if (query.metric === "ENGAGEMENT") {
+      return this.snapshotTimeSeries(accountIds, MetricType.ENGAGEMENT, start, end, "avg", 100);
+    }
+    return this.snapshotTimeSeries(accountIds, MetricType.FOLLOWERS, start, end, "sum", 1);
   }
 
-  private async followersTimeSeries(
+  /**
+   * Builds a daily time series from account snapshots. For each (day, account)
+   * the latest snapshot value wins; per day the values are summed or averaged
+   * across the accounts, then divided by `divisor` (ENGAGEMENT is stored ×100).
+   */
+  private async snapshotTimeSeries(
     accountIds: string[],
+    metricType: MetricType,
     start: Date | null,
-    end: Date | null
+    end: Date | null,
+    mode: "sum" | "avg",
+    divisor: number
   ): Promise<TimeSeriesDatum[]> {
     const snapshots = await this.prisma.analyticsSnapshot.findMany({
       where: {
         socialAccountId: { in: accountIds },
-        metricType: MetricType.FOLLOWERS,
+        metricType,
         postTargetId: null,
         ...(start || end
           ? {
@@ -582,7 +596,8 @@ export class AnalyticsAggregationService {
       orderBy: { periodStart: "asc" },
     });
 
-    // For each (day, account) keep the latest value, then sum per day.
+    // For each (day, account) keep the latest value (findMany is asc, so the
+    // last write for a day/account wins).
     const perDayAccount = new Map<string, Map<string, number>>();
     for (const s of snapshots) {
       const day = this.dayKey(s.periodStart);
@@ -593,55 +608,10 @@ export class AnalyticsAggregationService {
 
     return [...perDayAccount.entries()]
       .map(([date, byAccount]) => {
-        let value = 0;
-        for (const v of byAccount.values()) value += v;
-        return { date, value };
-      })
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  }
-
-  private async postBucketTimeSeries(
-    accountIds: string[],
-    metric: TimeSeriesMetric,
-    start: Date | null,
-    end: Date | null
-  ): Promise<TimeSeriesDatum[]> {
-    const targets = await this.prisma.postTarget.findMany({
-      where: {
-        socialAccountId: { in: accountIds },
-        publishedAt: {
-          not: null,
-          ...(start ? { gte: start } : {}),
-          ...(end ? { lte: end } : {}),
-        },
-      },
-      select: { publishedAt: true, platformSpecificContent: true },
-    });
-
-    interface Bucket {
-      likes: number;
-      comments: number;
-      impressions: number;
-    }
-    const byDay = new Map<string, Bucket>();
-    for (const t of targets) {
-      if (t.publishedAt == null) continue;
-      const day = this.dayKey(t.publishedAt);
-      const bucket =
-        byDay.get(day) ?? { likes: 0, comments: 0, impressions: 0 };
-      const psc = this.asMetricMap(t.platformSpecificContent);
-      bucket.likes += this.numField(psc, "likes");
-      bucket.comments += this.numField(psc, "comments");
-      bucket.impressions += this.numField(psc, "impressions");
-      byDay.set(day, bucket);
-    }
-
-    return [...byDay.entries()]
-      .map(([date, bucket]) => {
-        const value =
-          metric === "IMPRESSIONS"
-            ? bucket.impressions
-            : this.engagementForWindow(bucket);
+        const values = [...byAccount.values()];
+        const total = values.reduce((a, b) => a + b, 0);
+        const raw = mode === "avg" ? total / Math.max(1, values.length) : total;
+        const value = divisor === 1 ? raw : Number((raw / divisor).toFixed(2));
         return { date, value };
       })
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

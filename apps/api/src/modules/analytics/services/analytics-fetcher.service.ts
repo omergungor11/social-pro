@@ -61,7 +61,13 @@ export class AnalyticsFetcherService {
     if (accounts.length === 0) return { snapshotted: 0 };
 
     const results = await Promise.allSettled(
-      accounts.map((a) => this.fetchAccountMetrics(a.id))
+      accounts.map(async (a) => {
+        const snaps = await this.fetchAccountMetrics(a.id);
+        // Seed a flat baseline for the prior days so the growth charts render
+        // as a real line immediately; real daily values replace it over time.
+        await this.backfillBaseline(a.id, 14);
+        return snaps;
+      })
     );
 
     const snapshotted = results.filter(
@@ -76,6 +82,42 @@ export class AnalyticsFetcherService {
     }
 
     return { snapshotted };
+  }
+
+  /**
+   * Creates flat baseline snapshots for the prior `days` days at the account's
+   * current metric values, but only where a snapshot is missing — so it never
+   * overwrites a real day. This gives the growth charts a visible line on day
+   * one; genuine daily values accumulate over time and replace the baseline.
+   */
+  private async backfillBaseline(accountId: string, days: number): Promise<void> {
+    const account = await this.prisma.socialAccount.findUnique({
+      where: { id: accountId },
+      select: { metadata: true },
+    });
+    if (!account) return;
+
+    const m = await this.computeAccountMetricsFromDb(accountId, account.metadata);
+    const entries: Array<[MetricType, bigint]> = [
+      [MetricType.FOLLOWERS, BigInt(Math.round(m.followers))],
+      [MetricType.ENGAGEMENT, BigInt(Math.round(m.engagementRate * 100))],
+      [MetricType.IMPRESSIONS, BigInt(Math.round(m.impressions))],
+    ];
+
+    const now = new Date();
+    for (let d = 1; d <= days; d += 1) {
+      const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d);
+      for (const [metricType, value] of entries) {
+        const existing = await this.prisma.analyticsSnapshot.findFirst({
+          where: { socialAccountId: accountId, postTargetId: null, metricType, periodStart: day },
+          select: { id: true },
+        });
+        if (existing) continue;
+        await this.prisma.analyticsSnapshot.create({
+          data: { socialAccountId: accountId, metricType, value, periodStart: day, periodEnd: day },
+        });
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
