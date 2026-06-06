@@ -7,6 +7,7 @@ import { FacebookInboxAdapter } from "./adapters/facebook.inbox";
 import { InstagramInboxAdapter } from "./adapters/instagram.inbox";
 import { TwitterInboxAdapter } from "./adapters/twitter.inbox";
 import { LinkedInInboxAdapter } from "./adapters/linkedin.inbox";
+import { TikTokInboxAdapter } from "./adapters/tiktok.inbox";
 
 /**
  * Unified social inbox — fetches comments, mentions and direct messages from
@@ -22,6 +23,7 @@ import { LinkedInInboxAdapter } from "./adapters/linkedin.inbox";
     InstagramInboxAdapter,
     TwitterInboxAdapter,
     LinkedInInboxAdapter,
+    TikTokInboxAdapter,
   ],
   exports: [InboxService],
 })

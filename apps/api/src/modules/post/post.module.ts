@@ -13,6 +13,7 @@ import { TwitterPublisher } from "./publisher/adapters/twitter.publisher";
 import { FacebookPublisher } from "./publisher/adapters/facebook.publisher";
 import { InstagramPublisher } from "./publisher/adapters/instagram.publisher";
 import { LinkedInPublisher } from "./publisher/adapters/linkedin.publisher";
+import { TikTokPublisher } from "./publisher/adapters/tiktok.publisher";
 
 /**
  * Post module.
@@ -62,6 +63,7 @@ import { LinkedInPublisher } from "./publisher/adapters/linkedin.publisher";
     FacebookPublisher,
     InstagramPublisher,
     LinkedInPublisher,
+    TikTokPublisher,
 
     // Encryption (needed by PublisherService to decrypt tokens)
     EncryptionService,

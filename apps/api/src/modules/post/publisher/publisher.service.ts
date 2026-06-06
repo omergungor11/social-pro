@@ -11,6 +11,7 @@ import { TwitterPublisher } from "./adapters/twitter.publisher";
 import { FacebookPublisher } from "./adapters/facebook.publisher";
 import { InstagramPublisher } from "./adapters/instagram.publisher";
 import { LinkedInPublisher } from "./adapters/linkedin.publisher";
+import { TikTokPublisher } from "./adapters/tiktok.publisher";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,13 +55,15 @@ export class PublisherService {
     private readonly twitterPublisher: TwitterPublisher,
     private readonly facebookPublisher: FacebookPublisher,
     private readonly instagramPublisher: InstagramPublisher,
-    private readonly linkedInPublisher: LinkedInPublisher
+    private readonly linkedInPublisher: LinkedInPublisher,
+    private readonly tiktokPublisher: TikTokPublisher
   ) {
     this.adapters = new Map<SocialPlatform, PlatformPublisher>([
       [SocialPlatform.TWITTER, this.twitterPublisher],
       [SocialPlatform.FACEBOOK, this.facebookPublisher],
       [SocialPlatform.INSTAGRAM, this.instagramPublisher],
       [SocialPlatform.LINKEDIN, this.linkedInPublisher],
+      [SocialPlatform.TIKTOK, this.tiktokPublisher],
     ]);
   }
 

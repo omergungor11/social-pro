@@ -18,6 +18,7 @@ import { FacebookInboxAdapter } from "./adapters/facebook.inbox";
 import { InstagramInboxAdapter } from "./adapters/instagram.inbox";
 import { TwitterInboxAdapter } from "./adapters/twitter.inbox";
 import { LinkedInInboxAdapter } from "./adapters/linkedin.inbox";
+import { TikTokInboxAdapter } from "./adapters/tiktok.inbox";
 
 type InboxItemWithAccount = InboxItem & { socialAccount: SocialAccount };
 
@@ -78,12 +79,14 @@ export class InboxService {
     private readonly instagramAdapter: InstagramInboxAdapter,
     private readonly twitterAdapter: TwitterInboxAdapter,
     private readonly linkedInAdapter: LinkedInInboxAdapter,
+    private readonly tiktokAdapter: TikTokInboxAdapter,
   ) {
     this.adapters = new Map<SocialPlatform, PlatformInboxAdapter>([
       [SocialPlatform.FACEBOOK, this.facebookAdapter],
       [SocialPlatform.INSTAGRAM, this.instagramAdapter],
       [SocialPlatform.TWITTER, this.twitterAdapter],
       [SocialPlatform.LINKEDIN, this.linkedInAdapter],
+      [SocialPlatform.TIKTOK, this.tiktokAdapter],
     ]);
   }
 

@@ -67,6 +67,12 @@ const CHANNELS: Channel[] = [
     available: false,
     note: 'LinkedIn messaging needs Marketing/Community partner approval. This channel stays empty until partner access is granted.',
   },
+  {
+    platform: SocialPlatform.TIKTOK,
+    label: 'TikTok DM',
+    available: false,
+    note: 'TikTok has no public messaging API for third-party apps. This channel stays empty.',
+  },
 ];
 
 function channelIconPlatform(platform: SocialPlatform | null): Platform {
