@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { useNotificationStore } from "@/stores/notification-store";
+import { useBrandStore } from "@/stores/brand-store";
 import { NotificationDropdown } from "@/components/dashboard/notification-dropdown";
 import { BrandSelector } from "@/components/dashboard/brand-selector";
 import { useRealtime } from "@/hooks/use-realtime";
@@ -370,20 +371,26 @@ function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const toggleOpen = useNotificationStore((s) => s.toggleOpen);
   const setOpen = useNotificationStore((s) => s.setOpen);
+  const brands = useBrandStore((s) => s.brands);
 
   // Build breadcrumb from pathname
   function getBreadcrumb(): { label: string; href?: string }[] {
-    const segments = pathname
-      .split("/")
-      .filter(Boolean)
-      .map((seg) =>
-        seg
-          .split("-")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" ")
-      );
+    const raw = pathname.split("/").filter(Boolean);
 
-    if (segments.length === 1 && segments[0] === "Dashboard") {
+    // Turn a raw path segment into a human label. Brand ids (under /brands/)
+    // resolve to the brand name; everything else is title-cased.
+    const labelFor = (seg: string, prev: string | undefined): string => {
+      if (prev === "brands") {
+        const brand = brands.find((b) => b.id === seg);
+        if (brand) return brand.name;
+      }
+      return seg
+        .split("-")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+    };
+
+    if (raw.length === 1 && raw[0] === "dashboard") {
       return [{ label: "Dashboard" }];
     }
 
@@ -391,15 +398,9 @@ function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
       { label: "Dashboard", href: "/dashboard" },
     ];
 
-    segments.slice(1).forEach((seg, i) => {
-      const href =
-        "/" +
-        pathname
-          .split("/")
-          .filter(Boolean)
-          .slice(0, i + 2)
-          .join("/");
-      crumbs.push({ label: seg, href });
+    raw.slice(1).forEach((seg, i) => {
+      const href = "/" + raw.slice(0, i + 2).join("/");
+      crumbs.push({ label: labelFor(seg, raw[i]), href });
     });
 
     return crumbs;

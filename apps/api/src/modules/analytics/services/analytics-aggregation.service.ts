@@ -204,11 +204,18 @@ export class AnalyticsAggregationService {
     // reflect all-time data, which reads as a bug. When `start` is provided we
     // still honour it, but fall back to all-time when the range would
     // contradict the rest of the (un-ranged) metrics.
+    // When scoped to a brand, count posts published THROUGH that brand's
+    // accounts (via their targets) rather than Post.clientId — consistent with
+    // followers/engagement/top-posts, which are all derived from the brand's
+    // accounts. Synced historical posts carry a target on the account but no
+    // direct clientId, so the target-based count is what users expect.
     const postsPublished = await this.prisma.post.count({
       where: {
         agencyId,
         status: PostStatus.PUBLISHED,
-        ...(clientId ? { clientId } : {}),
+        ...(clientId
+          ? { targets: { some: { socialAccount: { clientId } } } }
+          : {}),
       },
     });
 
