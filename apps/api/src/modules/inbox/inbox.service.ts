@@ -230,6 +230,82 @@ export class InboxService {
     }
   }
 
+  /**
+   * TEMPORARY diagnostic: probes the platform DM (conversations) endpoints for
+   * each connected FB/IG account and returns the raw HTTP status + a body
+   * snippet, WITHOUT storing anything. Lets us see exactly why DM sync returns
+   * nothing (wrong id, missing scope, no conversations, toggle off, …).
+   */
+  async diagnoseDm(agencyId: string): Promise<unknown> {
+    const VER = "v22.0";
+    const accounts = await this.prisma.socialAccount.findMany({
+      where: {
+        agencyId,
+        isActive: true,
+        platform: { in: [SocialPlatform.FACEBOOK, SocialPlatform.INSTAGRAM] },
+      },
+    });
+
+    const probe = async (label: string, url: string): Promise<unknown> => {
+      try {
+        const r = await fetch(url);
+        const body = await r.text();
+        let count: number | null = null;
+        try {
+          const j = JSON.parse(body) as { data?: unknown[] };
+          if (Array.isArray(j.data)) count = j.data.length;
+        } catch {
+          /* non-JSON */
+        }
+        return { label, status: r.status, conversationCount: count, body: body.slice(0, 500) };
+      } catch (err) {
+        return { label, error: String(err) };
+      }
+    };
+
+    const results: unknown[] = [];
+    for (const account of accounts) {
+      let token: string;
+      try {
+        token = this.encryption.decrypt(account.accessToken);
+      } catch (err) {
+        results.push({ accountId: account.id, platform: account.platform, decryptError: String(err) });
+        continue;
+      }
+
+      const attempts: unknown[] = [];
+      // Resolve the Page id from the (page) token — IG conversations live on the Page.
+      const meRaw = await probe("me", `https://graph.facebook.com/${VER}/me?fields=id,name&access_token=${token}`);
+      attempts.push(meRaw);
+      const pageId =
+        meRaw && typeof meRaw === "object" && "body" in meRaw
+          ? (JSON.parse((meRaw as { body: string }).body) as { id?: string }).id
+          : undefined;
+
+      if (account.platform === SocialPlatform.INSTAGRAM) {
+        const f = "participants,messages.limit(5){id,message,from,created_time}";
+        attempts.push(await probe("ig-id/conversations", `https://graph.facebook.com/${VER}/${account.platformUserId}/conversations?platform=instagram&fields=${f}&access_token=${token}`));
+        if (pageId) {
+          attempts.push(await probe("page-id/conversations?ig", `https://graph.facebook.com/${VER}/${pageId}/conversations?platform=instagram&fields=${f}&access_token=${token}`));
+        }
+      } else {
+        const f = "participants,messages.limit(5){id,message,from,created_time}";
+        attempts.push(await probe("page-id/conversations?messenger", `https://graph.facebook.com/${VER}/${account.platformUserId}/conversations?platform=messenger&fields=${f}&access_token=${token}`));
+      }
+
+      results.push({
+        accountId: account.id,
+        platform: account.platform,
+        platformUserId: account.platformUserId,
+        resolvedPageId: pageId ?? null,
+        scopes: account.scopes,
+        attempts,
+      });
+    }
+
+    return { accounts: results };
+  }
+
   // ---------------------------------------------------------------------------
   // Read / list
   // ---------------------------------------------------------------------------
