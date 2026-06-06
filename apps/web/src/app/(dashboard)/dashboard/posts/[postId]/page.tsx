@@ -1024,9 +1024,9 @@ function PostInfoSidebar({
             <Building2 className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
             <div>
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Client</p>
-              <Link href={`/dashboard/brands/${post.clientId}`} className="text-sm font-medium text-blue-600 hover:underline">
+              <span className="text-sm font-medium text-slate-700">
                 {post.clientName}
-              </Link>
+              </span>
             </div>
           </div>
         )}
@@ -1508,9 +1508,9 @@ export default function PostDetailPage(): React.JSX.Element {
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 <StatusBadge status={status} />
                 {post.clientName && (
-                  <Link href={`/dashboard/brands/${post.clientId}`} className="text-xs text-slate-400 hover:text-blue-600 hover:underline">
+                  <span className="text-xs text-slate-400">
                     {post.clientName}
-                  </Link>
+                  </span>
                 )}
                 {isScheduled && post.scheduledAt && (
                   <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">

@@ -37,7 +37,6 @@ interface TimeSeriesChartProps {
   kind: ChartKind;
   startDate: string;
   endDate: string;
-  clientId: string | null;
   /** When true, format values/axis/tooltip as a percentage. */
   percent?: boolean;
   /** Message shown when the series has no data points. */
@@ -97,7 +96,6 @@ export function TimeSeriesChart({
   kind,
   startDate,
   endDate,
-  clientId,
   percent = false,
   emptyMessage,
   color,
@@ -110,10 +108,9 @@ export function TimeSeriesChart({
     let cancelled = false;
     setLoading(true);
 
-    const clientParam = clientId !== null ? `&clientId=${clientId}` : '';
     apiClient
       .get<TimeSeriesPoint[]>(
-        `/analytics/timeseries?metric=${metric}&startDate=${startDate}&endDate=${endDate}${clientParam}`
+        `/analytics/timeseries?metric=${metric}&startDate=${startDate}&endDate=${endDate}`
       )
       .then((points) => {
         if (cancelled) return;
@@ -131,7 +128,7 @@ export function TimeSeriesChart({
     return (): void => {
       cancelled = true;
     };
-  }, [metric, startDate, endDate, clientId]);
+  }, [metric, startDate, endDate]);
 
   return (
     <Card>

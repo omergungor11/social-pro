@@ -42,7 +42,6 @@ import {
 } from '@/components/social/platform-icon';
 import { CalendarView, type Post, type PostStatus } from '@/components/posts/calendar-view';
 import { apiClient } from '@/lib/api-client';
-import { useBrandStore } from '@/stores/brand-store';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -496,7 +495,6 @@ export default function PostsPage(): React.JSX.Element {
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
   const [platformFilter, setPlatformFilter] = React.useState('');
-  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   // Sorting
   const [sortKey, setSortKey] = React.useState<SortKey>('created');
@@ -525,7 +523,6 @@ export default function PostsPage(): React.JSX.Element {
       params.set('page', '1');
       if (statusFilter) params.set('status', statusFilter);
       if (platformFilter) params.set('platform', platformFilter);
-      if (selectedBrandId) params.set('clientId', selectedBrandId);
 
       // The API wraps the paginated response in { data: { items, total, page, limit } }
       // apiClient.get already unwraps the outer { data } envelope
@@ -554,7 +551,7 @@ export default function PostsPage(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, platformFilter, selectedBrandId]);
+  }, [statusFilter, platformFilter]);
 
   React.useEffect(() => {
     void fetchPosts();

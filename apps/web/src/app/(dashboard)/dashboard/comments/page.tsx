@@ -20,7 +20,6 @@ import {
 } from '@social-pro/shared-types';
 import { cn } from '@/lib/utils';
 import { apiClient, ApiRequestError } from '@/lib/api-client';
-import { useBrandStore } from '@/stores/brand-store';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
@@ -372,7 +371,6 @@ export default function CommentsPage(): React.JSX.Element {
   const [statusFilter, setStatusFilter] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('');
   const [platformFilter, setPlatformFilter] = React.useState('');
-  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   // Selection / thread
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -394,7 +392,6 @@ export default function CommentsPage(): React.JSX.Element {
       if (statusFilter) params.set('status', statusFilter);
       if (typeFilter) params.set('type', typeFilter);
       if (platformFilter) params.set('platform', platformFilter);
-      if (selectedBrandId) params.set('clientId', selectedBrandId);
 
       const res = await apiClient.getWithMeta<InboxItem[]>(`/inbox?${params.toString()}`);
       setItems(res.data ?? []);
@@ -405,19 +402,16 @@ export default function CommentsPage(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, typeFilter, platformFilter, selectedBrandId]);
+  }, [statusFilter, typeFilter, platformFilter]);
 
   const fetchStats = React.useCallback(async () => {
     try {
-      const statsPath = selectedBrandId
-        ? `/inbox/stats?clientId=${selectedBrandId}`
-        : '/inbox/stats';
-      const data = await apiClient.get<InboxStats>(statsPath);
+      const data = await apiClient.get<InboxStats>('/inbox/stats');
       setStats(data);
     } catch (err) {
       console.error('Failed to fetch inbox stats:', err);
     }
-  }, [selectedBrandId]);
+  }, []);
 
   React.useEffect(() => {
     void fetchItems();

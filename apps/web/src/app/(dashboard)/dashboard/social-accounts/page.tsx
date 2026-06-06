@@ -15,7 +15,6 @@ import type { SocialAccount } from '@/components/social/account-card';
 import type { Platform } from '@/components/social/platform-icon';
 import { apiClient } from '@/lib/api-client';
 import { buildAccountSlug } from '@/lib/account-slug';
-import { useBrandStore } from '@/stores/brand-store';
 
 // ---------------------------------------------------------------------------
 // Filter / Summary helpers
@@ -239,22 +238,18 @@ function SocialAccountsContent(): React.JSX.Element {
   const [instagramAccounts, setInstagramAccounts] = React.useState<InstagramAccount[]>([]);
   const [instagramSelectOpen, setInstagramSelectOpen] = React.useState(false);
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   // Fetch accounts from API
   const fetchAccounts = React.useCallback(async () => {
     try {
-      const path = selectedBrandId
-        ? `/social-accounts?clientId=${selectedBrandId}`
-        : '/social-accounts';
-      const data = await apiClient.get<ApiSocialAccount[]>(path);
+      const data = await apiClient.get<ApiSocialAccount[]>('/social-accounts');
       setAccounts(data.map(mapApiAccount));
     } catch (err) {
       console.error('Failed to fetch accounts:', err);
     } finally {
       setLoading(false);
     }
-  }, [selectedBrandId]);
+  }, []);
 
   React.useEffect(() => {
     void fetchAccounts();

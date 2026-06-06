@@ -28,7 +28,6 @@ import {
 import { PlatformIcon, type Platform } from '@/components/social/platform-icon';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
-import { useBrandStore } from '@/stores/brand-store';
 import { TimeSeriesChart } from '@/components/analytics/time-series-chart';
 
 // ---------------------------------------------------------------------------
@@ -249,7 +248,6 @@ export default function AnalyticsPage(): React.JSX.Element {
   const [overviewMetrics, setOverviewMetrics] = React.useState<OverviewMetric[]>([]);
   const [platformStats, setPlatformStats] = React.useState<PlatformStat[]>([]);
   const [topPosts, setTopPosts] = React.useState<TopPost[]>([]);
-  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
 
   const fetchOverview = React.useCallback(async (range: DateRange): Promise<void> => {
     if (range === 'custom') return; // Custom range requires date picker — skip auto-fetch
@@ -257,9 +255,8 @@ export default function AnalyticsPage(): React.JSX.Element {
     setError(null);
     try {
       const { startDate, endDate } = getRangeDate(range);
-      const brandParam = selectedBrandId ? `&clientId=${selectedBrandId}` : '';
       const data = await apiClient.get<ApiOverviewResponse>(
-        `/analytics/overview?startDate=${startDate}&endDate=${endDate}${brandParam}`
+        `/analytics/overview?startDate=${startDate}&endDate=${endDate}`
       );
 
       const metrics: OverviewMetric[] = [
@@ -327,11 +324,11 @@ export default function AnalyticsPage(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [selectedBrandId]);
+  }, []);
 
   React.useEffect(() => {
     void fetchOverview(dateRange);
-  }, [fetchOverview, dateRange, selectedBrandId]);
+  }, [fetchOverview, dateRange]);
 
   const handleDateRangeChange = (range: DateRange): void => {
     setDateRange(range);
@@ -421,7 +418,6 @@ export default function AnalyticsPage(): React.JSX.Element {
               kind="area"
               startDate={chartRange.startDate}
               endDate={chartRange.endDate}
-              clientId={selectedBrandId}
               emptyMessage="Collecting data — this chart fills in as snapshots accumulate"
               color="#2563eb"
             />
@@ -432,7 +428,6 @@ export default function AnalyticsPage(): React.JSX.Element {
               kind="line"
               startDate={chartRange.startDate}
               endDate={chartRange.endDate}
-              clientId={selectedBrandId}
               percent
               emptyMessage="No published posts in this range"
               color="#7c3aed"

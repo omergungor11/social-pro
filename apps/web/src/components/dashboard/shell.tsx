@@ -8,7 +8,6 @@ import {
   FileText,
   MessageSquare,
   MessageCircle,
-  Building2,
   Share2,
   BarChart3,
   Sparkles,
@@ -25,9 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { useNotificationStore } from "@/stores/notification-store";
-import { useBrandStore } from "@/stores/brand-store";
 import { NotificationDropdown } from "@/components/dashboard/notification-dropdown";
-import { BrandSelector } from "@/components/dashboard/brand-selector";
 import { useRealtime } from "@/hooks/use-realtime";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +104,6 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Posts", href: "/dashboard/posts", icon: FileText },
   { label: "Comments", href: "/dashboard/comments", icon: MessageSquare },
   { label: "Messages", href: "/dashboard/messages", icon: MessageCircle },
-  { label: "Brands", href: "/dashboard/brands", icon: Building2 },
   { label: "Social Accounts", href: "/dashboard/social-accounts", icon: Share2 },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "AI Content", href: "/dashboard/ai", icon: Sparkles, badge: "New" },
@@ -371,24 +367,16 @@ function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const toggleOpen = useNotificationStore((s) => s.toggleOpen);
   const setOpen = useNotificationStore((s) => s.setOpen);
-  const brands = useBrandStore((s) => s.brands);
 
   // Build breadcrumb from pathname
   function getBreadcrumb(): { label: string; href?: string }[] {
     const raw = pathname.split("/").filter(Boolean);
 
-    // Turn a raw path segment into a human label. Brand ids (under /brands/)
-    // resolve to the brand name; everything else is title-cased.
-    const labelFor = (seg: string, prev: string | undefined): string => {
-      if (prev === "brands") {
-        const brand = brands.find((b) => b.id === seg);
-        if (brand) return brand.name;
-      }
-      return seg
+    const labelFor = (seg: string): string =>
+      seg
         .split("-")
         .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
         .join(" ");
-    };
 
     if (raw.length === 1 && raw[0] === "dashboard") {
       return [{ label: "Dashboard" }];
@@ -400,7 +388,7 @@ function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
 
     raw.slice(1).forEach((seg, i) => {
       const href = "/" + raw.slice(0, i + 2).join("/");
-      crumbs.push({ label: labelFor(seg, raw[i]), href });
+      crumbs.push({ label: labelFor(seg), href });
     });
 
     return crumbs;
@@ -446,9 +434,6 @@ function Header({ onMenuOpen, user }: HeaderProps): React.JSX.Element {
           ))}
         </ol>
       </nav>
-
-      {/* Global brand selector */}
-      <BrandSelector />
 
       {/* Right actions */}
       <div className="flex items-center gap-2 shrink-0">

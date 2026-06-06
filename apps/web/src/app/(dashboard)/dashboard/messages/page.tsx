@@ -18,7 +18,6 @@ import {
 } from '@social-pro/shared-types';
 import { cn } from '@/lib/utils';
 import { apiClient, ApiRequestError } from '@/lib/api-client';
-import { useBrandStore } from '@/stores/brand-store';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -573,8 +572,6 @@ export default function MessagesPage(): React.JSX.Element {
   const [syncing, setSyncing] = React.useState(false);
   const [syncMessage, setSyncMessage] = React.useState<string | null>(null);
 
-  const selectedBrandId = useBrandStore((s) => s.selectedBrandId);
-
   // ── Fetch DMs ──────────────────────────────────────────────────────────────
   const fetchItems = React.useCallback(async () => {
     try {
@@ -584,7 +581,6 @@ export default function MessagesPage(): React.JSX.Element {
       params.set('type', InboxItemType.DIRECT_MESSAGE);
       params.set('limit', '100');
       if (activeChannel) params.set('platform', activeChannel);
-      if (selectedBrandId) params.set('clientId', selectedBrandId);
 
       const res = await apiClient.getWithMeta<InboxItem[]>(
         `/inbox?${params.toString()}`
@@ -596,16 +592,16 @@ export default function MessagesPage(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [activeChannel, selectedBrandId]);
+  }, [activeChannel]);
 
   React.useEffect(() => {
     void fetchItems();
   }, [fetchItems]);
 
-  // Reset the open conversation when the channel/brand changes.
+  // Reset the open conversation when the channel changes.
   React.useEffect(() => {
     setSelectedKey(null);
-  }, [activeChannel, selectedBrandId]);
+  }, [activeChannel]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const conversations = React.useMemo(
