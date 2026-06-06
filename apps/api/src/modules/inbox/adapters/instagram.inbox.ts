@@ -28,6 +28,26 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
   private readonly mediaLimit = 15;
   private readonly commentLimit = 25;
 
+  /**
+   * Resolves the Facebook Page id backing this IG account. Instagram
+   * conversations (DMs) and the Send API must be addressed on the PAGE id, not
+   * the IG user id — calling them on the IG id returns Graph error #3
+   * ("Application does not have the capability"). The stored token is the Page
+   * token, so /me returns the Page.
+   */
+  private async resolvePageId(account: InboxAccount): Promise<string | null> {
+    try {
+      const resp = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/me?fields=id&access_token=${encodeURIComponent(account.accessToken)}`,
+      );
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { id?: string };
+      return data.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async fetchItems(account: InboxAccount): Promise<FetchedInboxItem[]> {
     const items: FetchedInboxItem[] = [];
 
@@ -158,6 +178,13 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
       messages?: { data?: Message[] };
     };
 
+    // IG conversations live on the backing Page id, not the IG user id.
+    const pageId = await this.resolvePageId(account);
+    if (!pageId) {
+      this.logger.debug(`IG DM fetch skipped for account ${account.id}: no page id`);
+      return items;
+    }
+
     try {
       const params = new URLSearchParams({
         platform: "instagram",
@@ -166,11 +193,12 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
         access_token: account.accessToken,
       });
       const resp = await fetch(
-        `https://graph.facebook.com/${this.apiVersion}/${account.platformUserId}/conversations?${params.toString()}`,
+        `https://graph.facebook.com/${this.apiVersion}/${pageId}/conversations?${params.toString()}`,
       );
       if (!resp.ok) {
-        this.logger.debug(
-          `IG DM fetch skipped for account ${account.id}: ${resp.status}`,
+        const body = await resp.text();
+        this.logger.warn(
+          `IG DM fetch failed for account ${account.id} (${resp.status}): ${body.slice(0, 200)}`,
         );
         return items;
       }
@@ -217,12 +245,16 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
         throw new Error("Cannot reply to this DM: missing recipient id.");
       }
 
-      // POST /{ig-id}/messages — Instagram Send API.
+      // POST /{page-id}/messages — Instagram Send API (addressed on the Page).
+      const pageId = await this.resolvePageId(account);
+      if (!pageId) {
+        throw new Error("Instagram DM reply failed: could not resolve page id.");
+      }
       const params = new URLSearchParams({
         access_token: account.accessToken,
       });
       const resp = await fetch(
-        `https://graph.facebook.com/${this.apiVersion}/${account.platformUserId}/messages?${params.toString()}`,
+        `https://graph.facebook.com/${this.apiVersion}/${pageId}/messages?${params.toString()}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
