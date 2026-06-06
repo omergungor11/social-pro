@@ -42,12 +42,6 @@ export class InboxController {
     return this.inboxService.getStats(agencyId, clientId);
   }
 
-  @Get("diagnostics")
-  @ApiOperation({ summary: "TEMP: probe platform DM endpoints (no storage)" })
-  async diagnostics(@CurrentAgency() agencyId: string): Promise<unknown> {
-    return this.inboxService.diagnoseDm(agencyId);
-  }
-
   @Post("sync")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Pull new interactions from connected platforms" })

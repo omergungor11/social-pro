@@ -170,11 +170,13 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
     type Message = {
       id: string;
       message?: string;
-      from?: { id?: string; name?: string };
+      from?: { id?: string; name?: string; username?: string };
       created_time?: string;
     };
+    type Participant = { id?: string; username?: string; name?: string };
     type Conversation = {
       id: string;
+      participants?: { data?: Participant[] };
       messages?: { data?: Message[] };
     };
 
@@ -205,13 +207,22 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
       const data = (await resp.json()) as { data?: Conversation[] };
 
       for (const conv of data.data ?? []) {
+        // Map participant id -> username so each message can show a sender name
+        // (the message `from` sometimes carries only an id).
+        const participantById = new Map<string, Participant>();
+        for (const part of conv.participants?.data ?? []) {
+          if (part.id) participantById.set(part.id, part);
+        }
         for (const m of conv.messages?.data ?? []) {
+          const part = m.from?.id ? participantById.get(m.from.id) : undefined;
+          const username = m.from?.username ?? part?.username ?? null;
           items.push({
             platformItemId: m.id,
             type: "DIRECT_MESSAGE",
             parentPlatformId: conv.id,
             authorPlatformId: m.from?.id ?? null,
-            authorName: m.from?.name ?? null,
+            authorUsername: username,
+            authorName: m.from?.name ?? part?.name ?? username,
             text: m.message ?? null,
             isOutbound: m.from?.id === account.platformUserId,
             platformCreatedAt: m.created_time
