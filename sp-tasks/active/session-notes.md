@@ -1,5 +1,31 @@
 # Session Notes
 
+## 2026-06-08 — Session: Publish-now hata görünürlüğü (post yayınlanmıyor debug)
+
+### Problem
+- Kullanıcı: "post oluşuyor ama hesaplarda yayınlanmıyor" (FB + IG, publish-now)
+
+### Bulgular
+- **Yanıltıcı başarı mesajı (DÜZELTİLDİ)**: `posts/new` sayfasındaki `handlePublishNow` target'lar FAIL etse bile her zaman "Post published successfully" gösteriyordu. `/posts/:id/publish-now` endpoint'i, gönderim başarısız olsa da 200 dönüyor (publishNow per-target hataları yutup postu döndürüyor). → Artık yanıttaki target durumları kontrol ediliyor, gerçek platform `errorMessage`'ı toast'ta gösteriliyor (all-failed / partial-failed / success ayrımı)
+- **Kod akışı sağlam**: target'lar doğru ekleniyor (`buildCreatePayload` line 427), token'lar page-token olarak doğru saklanıyor (FB: `selectFacebookPage` → pageId+pageAccessToken; IG: `selectInstagram` → igId+pageAccessToken). Sorun platform API çağrısında, gerçek neden `PostTarget.errorMessage`'da
+- **Post detay sayfası zaten hatayı gösteriyor**: `posts/[postId]/page.tsx:192` → "Failed on {platform}: {errorMessage}" — deploy beklemeden gerçek neden görülebilir
+
+### Yarım Kalan / Bekleyen
+- [ ] **Asıl kök neden henüz belirlenmedi** — kullanıcının failed postu açıp `errorMessage`'ı paylaşması gerekiyor. En olası adaylar:
+  - Token süresi/izin (`OAuthException expired`) → hesabı yeniden bağla (ENCRYPTION_KEY değişimi)
+  - Medya R2'de public değil → IG `image_url` public olmalı; FB `fetchAsBlob` çekemezse ikisi de fail
+  - IG text-only post → "requires at least one image"
+
+### Sonraki Session
+- [ ] Kullanıcıdan gelen gerçek `errorMessage`'a göre kalıcı fix
+- [ ] Değişikliği canlıya deploy et (Render) ve publish-now hatasını gerçek mesajla doğrula
+
+### Dikkat Edilecekler
+- `/publish-now` endpoint'i her zaman 200 döner — frontend artık target status'larını kontrol ediyor; başka publish çağıran yerler de (örn. post editör) aynı pattern'i kullanmalı
+- IG publish: `platformUserId` = IG business account id, token = page token (DM'den farklı — DM Page id ister)
+
+---
+
 ## 2026-06-06 — Session: Canlı hosting + Unified Inbox/DM/Messages + Analitik grafikler
 
 ### Completed

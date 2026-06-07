@@ -80,9 +80,17 @@ interface ApiSocialAccount {
   isActive?: boolean;
 }
 
+interface ApiPostTarget {
+  id: string;
+  status?: string;
+  errorMessage?: string | null;
+  socialAccount?: { platform?: string; displayName?: string };
+}
+
 interface ApiPostResponse {
   id: string;
   status?: string;
+  targets?: ApiPostTarget[];
   [key: string]: unknown;
 }
 
@@ -505,8 +513,47 @@ export default function NewPostPage(): React.JSX.Element {
     try {
       const payload = buildCreatePayload();
       const created = await apiClient.post<ApiPostResponse>('/posts', payload);
-      // Trigger immediate publish
-      await apiClient.post(`/posts/${created.id}/publish-now`, {});
+      // Trigger immediate publish — the response contains per-target results.
+      const published = await apiClient.post<ApiPostResponse>(
+        `/posts/${created.id}/publish-now`,
+        {},
+      );
+
+      // The endpoint returns 200 even when individual targets fail, so inspect
+      // the per-target statuses and surface the real platform error instead of
+      // blindly claiming success.
+      const targets = published.targets ?? [];
+      const failed = targets.filter((t) => t.status === 'FAILED');
+
+      if (failed.length > 0 && failed.length === targets.length) {
+        // Every target failed — show the first platform error verbatim.
+        const f = failed[0]!;
+        const platform = f.socialAccount?.platform ?? 'platform';
+        const reason = f.errorMessage?.trim() || 'Unknown error';
+        setToast({
+          message: `Publishing failed (${platform}): ${reason}`,
+          type: 'error',
+        });
+        setSubmitting(false);
+        setSubmitAction(null);
+        return;
+      }
+
+      if (failed.length > 0) {
+        // Partial failure — some platforms published, some did not.
+        const names = failed
+          .map((t) => t.socialAccount?.platform ?? 'platform')
+          .join(', ');
+        setToast({
+          message: `Published, but failed on: ${names}. Check the post detail for details.`,
+          type: 'error',
+        });
+        setTimeout(() => {
+          router.push('/dashboard/posts');
+        }, 2000);
+        return;
+      }
+
       setToast({ message: 'Post published successfully.', type: 'success' });
       setTimeout(() => {
         router.push('/dashboard/posts');
