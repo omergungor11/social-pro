@@ -85,6 +85,17 @@ export class AnalyticsFetcherService {
   }
 
   /**
+   * Snapshots a single account immediately and seeds a 14-day flat baseline so
+   * its growth charts render right after the account is connected. Best-effort:
+   * mirrors the per-account body of snapshotAgencyNow for one account.
+   */
+  async snapshotAccountNow(accountId: string): Promise<AnalyticsSnapshot[]> {
+    const snaps = await this.fetchAccountMetrics(accountId);
+    await this.backfillBaseline(accountId, 14);
+    return snaps;
+  }
+
+  /**
    * Creates flat baseline snapshots for the prior `days` days at the account's
    * current metric values, but only where a snapshot is missing — so it never
    * overwrites a real day. This gives the growth charts a visible line on day

@@ -14,6 +14,8 @@ import { FacebookConnector } from "./connectors/facebook.connector";
 import { InstagramConnector } from "./connectors/instagram.connector";
 import { OAuthConfigService, PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
+import { InboxService } from "../inbox/inbox.service";
+import { AnalyticsFetcherService } from "../analytics/services/analytics-fetcher.service";
 
 export interface OAuthInitiation {
   authUrl: string;
@@ -106,6 +108,8 @@ export class SocialAccountService {
     private readonly encryption: EncryptionService,
     private readonly platformRegistry: PlatformRegistryService,
     private readonly oauthConfigService: OAuthConfigService,
+    private readonly inboxService: InboxService,
+    private readonly analyticsFetcher: AnalyticsFetcherService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -360,6 +364,10 @@ export class SocialAccountService {
     this.logger.log(
       `Social account connected: platform=${platform} agencyId=${agencyId} platformUserId=${profile.platformUserId}`,
     );
+
+    // Pull posts, inbox and analytics immediately so the dashboard has data
+    // right after connecting (Facebook/Instagram do this in their own flows).
+    await this.autoSyncOnConnect(agencyId, account.id);
 
     return this.stripTokens(account);
   }
@@ -652,22 +660,54 @@ export class SocialAccountService {
   }
 
   /**
-   * Best-effort post sync triggered right after an account is connected.
-   * Failures are logged but never block the connection — the user can still
-   * sync manually from the account detail page.
+   * Best-effort full sync triggered right after an account is connected so the
+   * dashboard, posts, inbox and analytics all have data immediately instead of
+   * staying empty until the user manually syncs.
+   *
+   * Runs three independent syncs:
+   *  1. Posts/media from the platform (populates posts + account metadata)
+   *  2. Inbox (comments + DMs)
+   *  3. Analytics snapshot + 14-day baseline (reads the DB, so runs after posts)
+   *
+   * Every step is isolated: a failing platform/permission never blocks the
+   * others, and the whole thing never blocks account connection — the user can
+   * still sync manually from the account detail page.
    */
   private async autoSyncOnConnect(
     agencyId: string,
     accountId: string,
   ): Promise<void> {
-    try {
-      const result = await this.syncFromPlatform(agencyId, accountId, true);
+    // Posts and inbox are independent — run them concurrently.
+    const [posts] = await Promise.allSettled([
+      this.syncFromPlatform(agencyId, accountId, true),
+      this.inboxService
+        .sync(agencyId, accountId)
+        .then((r) =>
+          this.logger.log(
+            `Auto-sync on connect: ${r.synced} inbox items for account ${accountId}`,
+          ),
+        ),
+    ]);
+
+    if (posts.status === "fulfilled") {
       this.logger.log(
-        `Auto-sync on connect: ${result.synced} posts for account ${accountId}`,
+        `Auto-sync on connect: ${posts.value.synced} posts for account ${accountId}`,
+      );
+    } else {
+      this.logger.warn(
+        `Auto-sync on connect (posts) failed for account ${accountId}: ${String(posts.reason)}`,
+      );
+    }
+
+    // Analytics derives from the freshly synced posts/metadata, so snapshot last.
+    try {
+      const snaps = await this.analyticsFetcher.snapshotAccountNow(accountId);
+      this.logger.log(
+        `Auto-sync on connect: ${snaps.length} analytics snapshots for account ${accountId}`,
       );
     } catch (err) {
       this.logger.warn(
-        `Auto-sync on connect failed for account ${accountId}: ${String(err)}`,
+        `Auto-sync on connect (analytics) failed for account ${accountId}: ${String(err)}`,
       );
     }
   }

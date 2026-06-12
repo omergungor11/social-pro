@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { PrismaModule } from "../common/prisma/prisma.module";
+import { InboxModule } from "../inbox/inbox.module";
+import { AnalyticsModule } from "../analytics/analytics.module";
 import { SocialAccountController } from "./social-account.controller";
 import { OAuthConfigController } from "./oauth-config.controller";
 import { SocialAccountService } from "./social-account.service";
@@ -32,7 +34,7 @@ import { TokenRefreshJob } from "./jobs/token-refresh.job";
  * in AppModule alongside this module.
  */
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, InboxModule, AnalyticsModule],
   controllers: [SocialAccountController, OAuthConfigController],
   providers: [
     // Core services

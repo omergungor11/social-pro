@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-06-12
+
+### Added
+- Auto-sync on connect: yeni bir sosyal hesap baglandiginda postlar + inbox (yorum/DM) + analytics snapshot otomatik senkronize ediliyor (onceden sadece postlar, o da yalnizca Facebook/Instagram icin). Generic OAuth callback'e baglandi → Twitter/LinkedIn/TikTok/YouTube de artik baglanir baglanmaz sync oluyor. `AnalyticsFetcherService.snapshotAccountNow()` eklendi; her adim izole (best-effort, baglantiyi bloke etmiyor).
+
 ## 2026-03-21
 
 ### Added
