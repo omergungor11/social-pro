@@ -1291,14 +1291,27 @@ export default function PostDetailPage(): React.JSX.Element {
     const contentText = contents[firstPlatform] ?? post?.content ?? '';
 
     // Build targets from connected social accounts matching selected platforms
-    const platformSet = new Set(Object.keys(contents).length > 0 ? Object.keys(contents) : post?.platforms ?? []);
+    const platformList =
+      Object.keys(contents).length > 0
+        ? (Object.keys(contents) as Platform[])
+        : post?.platforms ?? [];
+    const platformSet = new Set<string>(platformList);
     const targets = socialAccounts
       .filter((a) => platformSet.has(a.platform))
       .map((a) => ({ socialAccountId: a.id }));
 
+    // Base text + per-platform overrides keyed by platform (e.g. content.facebook).
+    // The publisher resolves the right caption per target from these keys, so
+    // each platform publishes its own edited text instead of a shared one.
+    const contentObj: Record<string, unknown> = { text: contentText };
+    platformList.forEach((p) => {
+      const t = contents[p];
+      if (typeof t === 'string' && t.length > 0) contentObj[p] = t;
+    });
+
     const payload: Record<string, unknown> = {
       title: title.trim(),
-      content: { text: contentText },
+      content: contentObj,
     };
 
     // Only send targets if we have social accounts to map

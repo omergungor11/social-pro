@@ -218,11 +218,26 @@ export class PublisherService {
 
     const decrypted = this.decryptAccount(socialAccount);
 
-    // Merge platform-specific overrides into content
+    // Resolve the platform-specific caption. The composer stores per-platform
+    // text either on the target (platformSpecificContent.text) or as a
+    // platform-keyed entry on the post content (e.g. content.facebook /
+    // content.instagram). Fall back to the shared text. Without this, every
+    // platform would publish the same base caption.
+    const overrides =
+      (target.platformSpecificContent as Record<string, unknown> | null) ?? undefined;
+    const platformKey = socialAccount.platform.toLowerCase();
+    const rawContent = content.raw ?? {};
+    const overrideText =
+      overrides && typeof overrides["text"] === "string"
+        ? (overrides["text"] as string)
+        : typeof rawContent[platformKey] === "string"
+          ? (rawContent[platformKey] as string)
+          : undefined;
+
     const mergedContent: PublishContent = {
       ...content,
-      platformOverrides:
-        (target.platformSpecificContent as Record<string, unknown> | null) ?? undefined,
+      text: overrideText ?? content.text,
+      platformOverrides: overrides,
     };
 
     try {
