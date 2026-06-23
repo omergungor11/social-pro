@@ -132,6 +132,22 @@ export class FacebookInboxAdapter implements PlatformInboxAdapter {
    * (#10, #200, OAuthException). We swallow all errors and return [] so a
    * missing scope never breaks the comment sync.
    */
+  /**
+   * True when a Send API error is the "outside the allowed window" error
+   * (Graph error #10, subcode 2534022) — the 24h messaging window has closed.
+   */
+  private isWindowClosedError(body: string): boolean {
+    if (body.includes("2534022")) return true;
+    try {
+      const parsed = JSON.parse(body) as {
+        error?: { code?: number; error_subcode?: number };
+      };
+      return parsed.error?.code === 10 || parsed.error?.error_subcode === 2534022;
+    } catch {
+      return false;
+    }
+  }
+
   private async fetchDirectMessages(
     account: InboxAccount,
   ): Promise<FetchedInboxItem[]> {
@@ -208,25 +224,46 @@ export class FacebookInboxAdapter implements PlatformInboxAdapter {
       }
 
       // POST /{page-id}/messages — Messenger Send API.
-      const params = new URLSearchParams({
-        access_token: account.accessToken,
-      });
-      const resp = await fetch(
-        `https://graph.facebook.com/${this.apiVersion}/${account.platformUserId}/messages?${params.toString()}`,
-        {
+      const url = `https://graph.facebook.com/${this.apiVersion}/${account.platformUserId}/messages?access_token=${encodeURIComponent(account.accessToken)}`;
+      const recipient = { id: context.authorPlatformId };
+
+      const send = (payload: Record<string, unknown>): Promise<Response> =>
+        fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messaging_type: "RESPONSE",
-            recipient: { id: context.authorPlatformId },
-            message: { text },
-          }),
-        },
-      );
+          body: JSON.stringify(payload),
+        });
 
+      // Standard reply: only allowed inside the 24-hour messaging window.
+      let resp = await send({
+        messaging_type: "RESPONSE",
+        recipient,
+        message: { text },
+      });
+
+      // If the window is closed (error #10 / subcode 2534022), retry once with
+      // the HUMAN_AGENT tag (extends the window to 7 days; requires the Human
+      // Agent feature on the app).
       if (!resp.ok) {
-        const reason = await resp.text();
-        throw new Error(`Facebook DM reply failed: ${reason}`);
+        const firstBody = await resp.text();
+        if (this.isWindowClosedError(firstBody)) {
+          resp = await send({
+            messaging_type: "MESSAGE_TAG",
+            tag: "HUMAN_AGENT",
+            recipient,
+            message: { text },
+          });
+          if (!resp.ok) {
+            const retryBody = await resp.text();
+            throw new Error(
+              this.isWindowClosedError(retryBody)
+                ? "Yanıt penceresi kapandı: Facebook, kullanıcının son mesajından 24 saat (insan temsilci etiketiyle 7 gün) sonra yanıt göndermeye izin vermiyor."
+                : `Facebook DM reply failed: ${retryBody}`,
+            );
+          }
+        } else {
+          throw new Error(`Facebook DM reply failed: ${firstBody}`);
+        }
       }
 
       const data = (await resp.json()) as { message_id: string };

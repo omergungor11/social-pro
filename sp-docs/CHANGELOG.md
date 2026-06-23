@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-23 (2)
+
+### Changed
+- Comments sayfasi feed/akis duzenine gecti (Instagram/Facebook gibi): postlar dogrudan kart olarak listeleniyor (hesap basligi + gorsel + caption), her postun altinda o posta ait yorumlar inline yanitla/sil/arsivle aksiyonlariyla. Iki-panel/thread yapisi kaldirildi. DM'ler bu sayfada listelenmiyor (Messages sayfasinda). Yorumlar postId'ye gore gruplaniyor, yanitlar parent yoruma nested.
+
+### Fixed
+- IG/FB DM yanit: 24 saatlik mesajlasma penceresi kapaliysa otomatik olarak HUMAN_AGENT etiketiyle yeniden deneniyor (pencereyi 7 gune uzatir; app'te Human Agent ozelligi gerekir). Yine de basarisizsa ham JSON yerine net mesaj gosteriliyor ("Yanit penceresi kapandi: ..."). Graph error #10 / subcode 2534022 tespiti eklendi.
+
 ## 2026-06-23
 
 ### Added

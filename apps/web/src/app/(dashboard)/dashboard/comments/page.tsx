@@ -8,11 +8,10 @@ import {
   AlertCircle,
   Inbox as InboxIcon,
   ExternalLink,
-  ArrowLeft,
-  Archive,
   Trash2,
-  ChevronDown,
-  ChevronRight,
+  Archive,
+  Reply as ReplyIcon,
+  CornerDownRight,
   Image as ImageIcon,
   MessageCircle,
 } from 'lucide-react';
@@ -34,12 +33,7 @@ import {
   getPlatformLabel,
 } from '@/components/social/platform-icon';
 import { InboxAvatar } from '@/components/inbox/inbox-avatar';
-import {
-  relativeTime,
-  toPlatformIcon,
-  TYPE_LABEL,
-  TYPE_BADGE,
-} from '@/components/inbox/helpers';
+import { relativeTime, toPlatformIcon } from '@/components/inbox/helpers';
 
 // ---------------------------------------------------------------------------
 // Filter options
@@ -52,11 +46,12 @@ const STATUS_OPTIONS = [
   { value: InboxItemStatus.ARCHIVED, label: 'Archived' },
 ];
 
+// Direct messages have their own Messages page — the Comments page lists only
+// comments and mentions.
 const TYPE_OPTIONS = [
   { value: '', label: 'All types' },
   { value: InboxItemType.COMMENT, label: 'Comment' },
   { value: InboxItemType.MENTION, label: 'Mention' },
-  { value: InboxItemType.DIRECT_MESSAGE, label: 'Direct message' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -70,32 +65,30 @@ function bestTime(item: InboxItem): string | null {
 function accountLabel(item: InboxItem): string {
   const a = item.account;
   if (!a) return getPlatformLabel(toPlatformIcon(item.platform));
-  return a.displayName ?? (a.username ? `@${a.username}` : getPlatformLabel(toPlatformIcon(item.platform)));
-}
-
-function hasPostContext(item: InboxItem): boolean {
-  return Boolean(
-    item.postPreviewText ||
-      item.postPreviewImageUrl ||
-      item.postPermalink ||
-      item.platformPostId
+  return (
+    a.displayName ??
+    (a.username ? `@${a.username}` : getPlatformLabel(toPlatformIcon(item.platform)))
   );
 }
 
-const UNGROUPED_KEY = '__direct__';
+const UNGROUPED_KEY = '__ungrouped__';
 
-interface InboxGroup {
+interface PostGroup {
   key: string;
   postPreviewText: string | null;
   postPreviewImageUrl: string | null;
   postPermalink: string | null;
   platformPostId: string | null;
+  platform: SocialPlatform;
+  account: InboxItem['account'];
   items: InboxItem[];
 }
 
-function groupByPost(items: InboxItem[]): InboxGroup[] {
+/** Buckets inbox items into one group per parent post (Instagram/Facebook feed
+ * style). Comments that carry no post context land in a single "Other" group. */
+function groupByPost(items: InboxItem[]): PostGroup[] {
   const order: string[] = [];
-  const map = new Map<string, InboxGroup>();
+  const map = new Map<string, PostGroup>();
 
   for (const item of items) {
     const key = item.platformPostId ?? UNGROUPED_KEY;
@@ -107,6 +100,8 @@ function groupByPost(items: InboxItem[]): InboxGroup[] {
         postPreviewImageUrl: item.postPreviewImageUrl,
         postPermalink: item.postPermalink,
         platformPostId: item.platformPostId,
+        platform: item.platform,
+        account: item.account,
         items: [],
       };
       map.set(key, group);
@@ -115,508 +110,389 @@ function groupByPost(items: InboxItem[]): InboxGroup[] {
       group.postPreviewText ??= item.postPreviewText;
       group.postPreviewImageUrl ??= item.postPreviewImageUrl;
       group.postPermalink ??= item.postPermalink;
+      group.account ??= item.account;
     }
     group.items.push(item);
   }
 
-  // Direct messages / ungrouped go to the top.
+  // Posts first, ungrouped comments last.
   return order
     .map((k) => map.get(k)!)
     .sort((a, b) => {
-      if (a.key === UNGROUPED_KEY) return -1;
+      if (a.key === UNGROUPED_KEY) return 1;
       if (b.key === UNGROUPED_KEY) return 1;
       return 0;
     });
 }
 
-function groupCaption(group: InboxGroup): string {
-  if (group.postPreviewText) return group.postPreviewText;
-  if (group.platformPostId) return `Post ${group.platformPostId.slice(0, 8)}`;
-  return 'Post';
+/** Splits a group's items into top-level comments and a map of replies keyed by
+ * the parent comment's platform id (our outbound replies thread under these). */
+function threadItems(group: PostGroup): {
+  topLevel: InboxItem[];
+  repliesByParent: Map<string, InboxItem[]>;
+} {
+  const idSet = new Set(group.items.map((i) => i.platformItemId));
+  const repliesByParent = new Map<string, InboxItem[]>();
+  const topLevel: InboxItem[] = [];
+
+  for (const item of group.items) {
+    const parent = item.parentPlatformId;
+    // A reply nests only when its parent is another comment in this group.
+    if (parent && idSet.has(parent)) {
+      const arr = repliesByParent.get(parent) ?? [];
+      arr.push(item);
+      repliesByParent.set(parent, arr);
+    } else {
+      topLevel.push(item);
+    }
+  }
+
+  const byTime = (a: InboxItem, b: InboxItem): number =>
+    (bestTime(a) ?? '').localeCompare(bestTime(b) ?? '');
+  topLevel.sort(byTime);
+  for (const arr of repliesByParent.values()) arr.sort(byTime);
+
+  return { topLevel, repliesByParent };
 }
 
 // ---------------------------------------------------------------------------
-// List row
+// A single comment (with its nested replies + inline reply box)
 // ---------------------------------------------------------------------------
 
-function ListRow({
-  item,
-  active,
-  onSelect,
-}: {
-  item: InboxItem;
-  active: boolean;
-  onSelect: () => void;
-}): React.JSX.Element {
-  const unread = item.status === InboxItemStatus.UNREAD;
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        'flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors',
-        active ? 'bg-blue-50/70' : 'hover:bg-slate-50',
-        unread && !active && 'bg-white'
-      )}
-      aria-current={active}
-    >
-      <div className="relative shrink-0">
-        <InboxAvatar
-          name={item.authorName}
-          username={item.authorUsername}
-          avatarUrl={item.authorAvatarUrl}
-        />
-        <span className="absolute -bottom-1 -right-1">
-          <PlatformIcon platform={toPlatformIcon(item.platform)} size="sm" className="h-4 w-4 rounded-md" />
-        </span>
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-semibold text-slate-900">
-            {item.authorName ?? item.authorUsername ?? 'Unknown'}
-          </p>
-          {item.authorUsername && (
-            <span className="truncate text-xs text-slate-400">@{item.authorUsername}</span>
-          )}
-          <span className="ml-auto shrink-0 text-[11px] text-slate-400">
-            {relativeTime(bestTime(item))}
-          </span>
-          {unread && (
-            <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-label="Unread" />
-          )}
-        </div>
-        <p className="mt-0.5 line-clamp-2 text-xs text-slate-500 leading-relaxed">
-          {item.text ?? <span className="italic text-slate-300">No text</span>}
-        </p>
-        <div className="mt-1 flex items-center gap-1.5">
-          <Badge variant={TYPE_BADGE[item.type]} className="px-1.5 py-0 text-[10px]">
-            {TYPE_LABEL[item.type]}
-          </Badge>
-          <span className="truncate text-[10px] text-slate-400">{accountLabel(item)}</span>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Post group header (collapsible)
-// ---------------------------------------------------------------------------
-
-function PostGroupHeader({
-  group,
-  expanded,
-  unread,
-  onToggle,
-}: {
-  group: InboxGroup;
-  expanded: boolean;
-  unread: number;
-  onToggle: () => void;
-}): React.JSX.Element {
-  const isDirect = group.key === UNGROUPED_KEY;
-
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex w-full items-center gap-2.5 border-b border-slate-100 bg-slate-50/80 px-3 py-2 text-left transition-colors hover:bg-slate-100"
-    >
-      {expanded ? (
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-      ) : (
-        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-      )}
-      {isDirect ? (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-500">
-          <MessageCircle className="h-4 w-4" />
-        </div>
-      ) : group.postPreviewImageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={group.postPreviewImageUrl}
-          alt=""
-          className="h-8 w-8 shrink-0 rounded-lg border border-slate-200 object-cover"
-        />
-      ) : (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-500">
-          <ImageIcon className="h-4 w-4" />
-        </div>
-      )}
-      <p className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-700">
-        {isDirect ? 'Direct messages' : groupCaption(group)}
-      </p>
-      <span className="shrink-0 text-[11px] text-slate-400">{group.items.length}</span>
-      {unread > 0 && (
-        <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-label="Unread" />
-      )}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Thread message bubble
-// ---------------------------------------------------------------------------
-
-function MessageBubble({
-  item,
+function CommentRow({
+  comment,
+  replies,
+  deletingId,
+  onReply,
   onDelete,
-  deleting,
+  onArchive,
+  onMarkRead,
 }: {
-  item: InboxItem;
-  onDelete?: (item: InboxItem) => void;
-  deleting?: boolean;
+  comment: InboxItem;
+  replies: InboxItem[];
+  deletingId: string | null;
+  onReply: (parent: InboxItem, text: string) => Promise<void>;
+  onDelete: (item: InboxItem) => void;
+  onArchive: (item: InboxItem) => void;
+  onMarkRead: (item: InboxItem) => void;
 }): React.JSX.Element {
-  const outbound = item.isOutbound;
-  const canDelete = !outbound && onDelete !== undefined;
+  const [open, setOpen] = React.useState(false);
+  const [text, setText] = React.useState('');
+  const [sending, setSending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const unread = comment.status === InboxItemStatus.UNREAD;
+  const replyUnsupported = comment.platform === SocialPlatform.LINKEDIN;
+
+  function toggleReply(): void {
+    const next = !open;
+    setOpen(next);
+    setError(null);
+    if (next && unread) onMarkRead(comment);
+  }
+
+  async function send(): Promise<void> {
+    if (!text.trim()) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onReply(comment, text.trim());
+      setText('');
+      setOpen(false);
+    } catch (err) {
+      setError(
+        err instanceof ApiRequestError ? err.message : 'Yanıt gönderilemedi.'
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
-    <div className={cn('group flex gap-3', outbound && 'flex-row-reverse')}>
+    <div className="flex gap-2.5 px-4 py-3">
       <InboxAvatar
-        name={item.authorName}
-        username={item.authorUsername}
-        avatarUrl={item.authorAvatarUrl}
-        className="h-8 w-8"
+        name={comment.authorName}
+        username={comment.authorUsername}
+        avatarUrl={comment.authorAvatarUrl}
+        className="h-8 w-8 shrink-0"
       />
-      <div className={cn('min-w-0 max-w-[80%]', outbound && 'items-end text-right')}>
-        <div className={cn('flex items-center gap-2', outbound && 'flex-row-reverse')}>
-          <span className="text-xs font-semibold text-slate-700">
-            {outbound ? 'You' : item.authorName ?? item.authorUsername ?? 'Unknown'}
-          </span>
-          <span className="text-[11px] text-slate-400">{relativeTime(bestTime(item))}</span>
-        </div>
-        <div className={cn('mt-1 flex items-center gap-1.5', outbound && 'flex-row-reverse')}>
-          <div
-            className={cn(
-              'inline-block rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap',
-              outbound
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 text-slate-800'
+      <div className="min-w-0 flex-1">
+        {/* Comment bubble */}
+        <div className="inline-block max-w-full rounded-2xl bg-slate-100 px-3.5 py-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-800">
+              {comment.authorName ?? comment.authorUsername ?? 'Unknown'}
+            </span>
+            {unread && (
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600"
+                aria-label="Unread"
+              />
             )}
-          >
-            {item.text ?? <span className="italic opacity-70">No text</span>}
           </div>
-          {canDelete && (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+            {comment.text ?? <span className="italic text-slate-400">No text</span>}
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="mt-1 flex items-center gap-3 pl-1 text-[11px] text-slate-400">
+          <span>{relativeTime(bestTime(comment))}</span>
+          {!replyUnsupported && (
             <button
               type="button"
-              onClick={() => onDelete?.(item)}
-              disabled={deleting}
-              className="shrink-0 rounded-md p-1 text-slate-300 opacity-0 transition-colors hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Delete comment"
-              aria-label="Delete comment"
+              onClick={toggleReply}
+              className="flex items-center gap-1 font-medium hover:text-slate-600"
             >
-              {deleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" />
-              )}
+              <ReplyIcon className="h-3 w-3" />
+              Reply
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => onArchive(comment)}
+            className="flex items-center gap-1 hover:text-slate-600"
+          >
+            <Archive className="h-3 w-3" />
+            Archive
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(comment)}
+            disabled={deletingId === comment.id}
+            className="flex items-center gap-1 hover:text-red-500 disabled:opacity-50"
+          >
+            {deletingId === comment.id ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Trash2 className="h-3 w-3" />
+            )}
+            Delete
+          </button>
+          {comment.permalink && (
+            <a
+              href={comment.permalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-slate-600"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
         </div>
+
+        {/* Nested replies */}
+        {replies.map((reply) => (
+          <div key={reply.id} className="mt-2 flex items-start gap-2 pl-3">
+            <CornerDownRight className="mt-2 h-3.5 w-3.5 shrink-0 text-slate-300" />
+            <InboxAvatar
+              name={reply.authorName}
+              username={reply.authorUsername}
+              avatarUrl={reply.authorAvatarUrl}
+              className="h-6 w-6 shrink-0"
+            />
+            <div className="min-w-0 flex-1">
+              <div
+                className={cn(
+                  'inline-block max-w-full rounded-2xl px-3 py-1.5',
+                  reply.isOutbound ? 'bg-blue-600 text-white' : 'bg-slate-100'
+                )}
+              >
+                <span
+                  className={cn(
+                    'text-[11px] font-semibold',
+                    reply.isOutbound ? 'text-blue-50' : 'text-slate-700'
+                  )}
+                >
+                  {reply.isOutbound
+                    ? 'You'
+                    : reply.authorName ?? reply.authorUsername ?? 'Unknown'}
+                </span>
+                <p
+                  className={cn(
+                    'whitespace-pre-wrap text-sm leading-relaxed',
+                    reply.isOutbound ? 'text-white' : 'text-slate-800'
+                  )}
+                >
+                  {reply.text}
+                </p>
+              </div>
+              <div className="mt-0.5 flex items-center gap-3 pl-1 text-[11px] text-slate-400">
+                <span>{relativeTime(bestTime(reply))}</span>
+                {!reply.isOutbound && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(reply)}
+                    disabled={deletingId === reply.id}
+                    className="flex items-center gap-1 hover:text-red-500 disabled:opacity-50"
+                  >
+                    {deletingId === reply.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3 w-3" />
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* Inline reply box */}
+        {open && (
+          <div className="mt-2 pl-1">
+            {error !== null && (
+              <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                disabled={sending}
+                placeholder="Write a reply..."
+                rows={1}
+                autoFocus
+                className={cn(
+                  'flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm',
+                  'placeholder:text-muted-foreground',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  'disabled:cursor-not-allowed disabled:opacity-50'
+                )}
+              />
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={sending || !text.trim()}
+                onClick={() => void send()}
+              >
+                {sending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Thread pane
+// A post card (post header + media + caption + its comments)
 // ---------------------------------------------------------------------------
 
-function ThreadPane({
-  thread,
-  loading,
-  onBack,
-  onReplied,
+function PostCard({
+  group,
+  deletingId,
+  onReply,
+  onDelete,
   onArchive,
-  onDeleted,
+  onMarkRead,
 }: {
-  thread: InboxItem | null;
-  loading: boolean;
-  onBack: () => void;
-  onReplied: (reply: InboxItem) => void;
-  onArchive: () => void;
-  onDeleted: (id: string, isThreadRoot: boolean) => void;
+  group: PostGroup;
+  deletingId: string | null;
+  onReply: (parent: InboxItem, text: string) => Promise<void>;
+  onDelete: (item: InboxItem) => void;
+  onArchive: (item: InboxItem) => void;
+  onMarkRead: (item: InboxItem) => void;
 }): React.JSX.Element {
-  const [text, setText] = React.useState('');
-  const [sending, setSending] = React.useState(false);
-  const [replyError, setReplyError] = React.useState<string | null>(null);
-  const [deletingId, setDeletingId] = React.useState<string | null>(null);
-  const [deleteNotice, setDeleteNotice] = React.useState<string | null>(null);
-  const [localReplies, setLocalReplies] = React.useState<InboxItem[]>([]);
-  const threadId = thread?.id ?? null;
-
-  React.useEffect(() => {
-    setText('');
-    setReplyError(null);
-    setDeleteNotice(null);
-    setLocalReplies([]);
-  }, [threadId]);
-
-  if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
-      </div>
-    );
-  }
-
-  if (!thread) {
-    return (
-      <div className="hidden flex-1 flex-col items-center justify-center p-10 text-center md:flex">
-        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
-          <InboxIcon className="h-7 w-7 text-slate-400" />
-        </div>
-        <p className="text-sm font-medium text-slate-600">Select a conversation</p>
-        <p className="mt-1 text-xs text-slate-400">
-          Pick an item from the list to view the thread and reply.
-        </p>
-      </div>
-    );
-  }
-
-  // Replying works for comments/replies (FB/IG) and mentions (Twitter). It is
-  // genuinely unavailable for LinkedIn (no partner API) and for direct messages
-  // (our adapters don't send DMs yet) — block those up front; otherwise let the
-  // backend be the authority and surface any 400 it returns.
-  const replyUnsupported =
-    thread.platform === SocialPlatform.LINKEDIN ||
-    thread.type === InboxItemType.DIRECT_MESSAGE;
-  const replyDisabled = replyUnsupported || replyError !== null;
-
-  async function handleSend(): Promise<void> {
-    if (!thread || !text.trim()) return;
-    setSending(true);
-    setReplyError(null);
-    try {
-      const reply = await apiClient.post<InboxItem>(`/inbox/${thread.id}/reply`, {
-        text: text.trim(),
-      });
-      onReplied(reply);
-      setText('');
-    } catch (err) {
-      if (err instanceof ApiRequestError) {
-        setReplyError(err.message);
-      } else {
-        setReplyError('Failed to send reply. Please try again.');
-      }
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function handleDelete(item: InboxItem): Promise<void> {
-    if (!window.confirm('Bu yorumu silmek istediğinize emin misiniz?')) return;
-    setDeletingId(item.id);
-    setDeleteNotice(null);
-    try {
-      const result = await apiClient.delete<InboxDeleteResult>(`/inbox/${item.id}`);
-      const isThreadRoot = item.id === threadId;
-      if (!isThreadRoot) {
-        setLocalReplies((prev) => [...prev, item]);
-      }
-      if (!result.platform.supported || !result.platform.success) {
-        const reason = result.platform.message ?? 'platform bu işlemi desteklemiyor';
-        setDeleteNotice(`Panelden silindi, ancak platformdan silinemedi: ${reason}`);
-      }
-      onDeleted(item.id, isThreadRoot);
-    } catch (err) {
-      if (err instanceof ApiRequestError) {
-        setDeleteNotice(err.message);
-      } else {
-        setDeleteNotice('Silme işlemi başarısız oldu. Lütfen tekrar deneyin.');
-      }
-    } finally {
-      setDeletingId(null);
-    }
-  }
-
-  const showPostCard = hasPostContext(thread);
-  const captionText = thread.postPreviewText;
-  const postLink = thread.postPermalink;
-  const removedReplyIds = new Set(localReplies.map((r) => r.id));
+  const isUngrouped = group.key === UNGROUPED_KEY;
+  const { topLevel, repliesByParent } = React.useMemo(
+    () => threadItems(group),
+    [group]
+  );
+  const commentCount = topLevel.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* Thread header */}
-      <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors md:hidden"
-          aria-label="Back to list"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      {/* Post header */}
+      <div className="flex items-center gap-3 px-4 py-3">
         <div className="relative shrink-0">
           <InboxAvatar
-            name={thread.authorName}
-            username={thread.authorUsername}
-            avatarUrl={thread.authorAvatarUrl}
+            name={group.account?.displayName ?? null}
+            username={group.account?.username ?? null}
+            avatarUrl={group.account?.avatarUrl ?? null}
+            className="h-9 w-9"
           />
           <span className="absolute -bottom-1 -right-1">
-            <PlatformIcon platform={toPlatformIcon(thread.platform)} size="sm" className="h-4 w-4 rounded-md" />
+            <PlatformIcon
+              platform={toPlatformIcon(group.platform)}
+              size="sm"
+              className="h-4 w-4 rounded-md"
+            />
           </span>
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900">
-            {thread.authorName ?? thread.authorUsername ?? 'Unknown'}
+            {isUngrouped
+              ? 'Other comments'
+              : group.account?.displayName ??
+                getPlatformLabel(toPlatformIcon(group.platform))}
           </p>
           <p className="truncate text-xs text-slate-400">
-            {TYPE_LABEL[thread.type]} · {accountLabel(thread)}
+            {isUngrouped
+              ? 'Comments without a linked post'
+              : group.account?.username
+                ? `@${group.account.username}`
+                : getPlatformLabel(toPlatformIcon(group.platform))}
           </p>
         </div>
-        {thread.permalink && (
+        {group.postPermalink && (
           <a
-            href={thread.permalink}
+            href={group.postPermalink}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-            title="Open on platform"
+            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 transition-colors hover:bg-blue-50"
           >
-            <ExternalLink className="h-4 w-4" />
+            <ExternalLink className="h-3.5 w-3.5" />
+            View post
           </a>
         )}
-        <button
-          type="button"
-          onClick={onArchive}
-          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-          title="Archive"
-          aria-label="Archive"
-        >
-          <Archive className="h-4 w-4" />
-        </button>
-        {!thread.isOutbound && (
-          <button
-            type="button"
-            onClick={() => void handleDelete(thread)}
-            disabled={deletingId === thread.id}
-            className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-            title="Delete comment"
-            aria-label="Delete comment"
-          >
-            {deletingId === thread.id ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-          </button>
-        )}
       </div>
 
-      {/* Post context card */}
-      {showPostCard && (
-        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
-          {thread.postPreviewImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={thread.postPreviewImageUrl}
-              alt=""
-              className="h-11 w-11 shrink-0 rounded-lg border border-slate-200 object-cover"
-            />
-          ) : (
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-500">
-              <ImageIcon className="h-5 w-5" />
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-              Post
-            </p>
-            <p className="line-clamp-2 text-xs text-slate-600 leading-relaxed">
-              {captionText ?? (
-                <span className="italic text-slate-400">
-                  {thread.platformPostId
-                    ? `Post ${thread.platformPostId.slice(0, 8)}`
-                    : 'Post'}
-                </span>
-              )}
-            </p>
-          </div>
-          {postLink && (
-            <a
-              href={postLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 transition-colors hover:bg-blue-50"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              View post
-            </a>
-          )}
-        </div>
-      )}
-
-      {/* Delete notice */}
-      {deleteNotice !== null && (
-        <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{deleteNotice}</span>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <MessageBubble
-          item={thread}
-          onDelete={(it) => void handleDelete(it)}
-          deleting={deletingId === thread.id}
+      {/* Post media */}
+      {!isUngrouped && group.postPreviewImageUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={group.postPreviewImageUrl}
+          alt=""
+          className="max-h-96 w-full border-y border-slate-100 object-cover"
         />
-        {(thread.replies ?? [])
-          .filter((reply) => !removedReplyIds.has(reply.id))
-          .map((reply) => (
-            <MessageBubble
-              key={reply.id}
-              item={reply}
-              onDelete={(it) => void handleDelete(it)}
-              deleting={deletingId === reply.id}
-            />
-          ))}
+      )}
+
+      {/* Post caption */}
+      {!isUngrouped && group.postPreviewText && (
+        <p className="whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed text-slate-700">
+          {group.postPreviewText}
+        </p>
+      )}
+
+      {/* Comment count divider */}
+      <div className="flex items-center gap-1.5 border-y border-slate-100 bg-slate-50/60 px-4 py-1.5 text-xs font-medium text-slate-500">
+        <MessageCircle className="h-3.5 w-3.5" />
+        {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
       </div>
 
-      {/* Reply box */}
-      <div className="border-t border-slate-100 p-3">
-        {replyError !== null && (
-          <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{replyError}</span>
-          </div>
-        )}
-        {replyUnsupported && replyError === null && (
-          <p className="mb-2 text-[11px] text-slate-400">
-            {thread.platform === SocialPlatform.LINKEDIN
-              ? 'Replying on LinkedIn requires Community Management partner access.'
-              : 'Direct message replies are not supported yet.'}
-          </p>
-        )}
-        <div className="flex items-end gap-2">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            disabled={replyDisabled || sending}
-            placeholder={replyDisabled ? 'Reply unavailable' : 'Write a reply...'}
-            rows={2}
-            className={cn(
-              'flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm',
-              'placeholder:text-muted-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-              'disabled:cursor-not-allowed disabled:opacity-50'
-            )}
+      {/* Comments */}
+      <div className="divide-y divide-slate-50">
+        {topLevel.map((comment) => (
+          <CommentRow
+            key={comment.id}
+            comment={comment}
+            replies={repliesByParent.get(comment.platformItemId) ?? []}
+            deletingId={deletingId}
+            onReply={onReply}
+            onDelete={onDelete}
+            onArchive={onArchive}
+            onMarkRead={onMarkRead}
           />
-          <Button
-            size="sm"
-            className="gap-1.5"
-            disabled={replyDisabled || sending || !text.trim()}
-            onClick={() => void handleSend()}
-          >
-            {sending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Send
-          </Button>
-        </div>
+        ))}
       </div>
     </div>
   );
@@ -638,30 +514,15 @@ export default function CommentsPage(): React.JSX.Element {
   const [typeFilter, setTypeFilter] = React.useState('');
   const [platformFilter, setPlatformFilter] = React.useState('');
 
-  // Selection / thread
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [thread, setThread] = React.useState<InboxItem | null>(null);
-  const [threadLoading, setThreadLoading] = React.useState(false);
-
   // Sync
   const [syncing, setSyncing] = React.useState(false);
   const [syncMessage, setSyncMessage] = React.useState<string | null>(null);
 
-  // Collapsed post groups (keys that are collapsed; default = expanded)
-  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(
-    () => new Set()
-  );
+  // Mutations
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
 
   const groups = React.useMemo(() => groupByPost(items), [items]);
-
-  const toggleGroup = React.useCallback((key: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
 
   // ── Fetch list ─────────────────────────────────────────────────────────────
   const fetchItems = React.useCallback(async () => {
@@ -670,14 +531,21 @@ export default function CommentsPage(): React.JSX.Element {
       setError(null);
       const params = new URLSearchParams();
       params.set('page', '1');
-      params.set('limit', '50');
+      params.set('limit', '100');
       if (statusFilter) params.set('status', statusFilter);
       if (typeFilter) params.set('type', typeFilter);
       if (platformFilter) params.set('platform', platformFilter);
 
-      const res = await apiClient.getWithMeta<InboxItem[]>(`/inbox?${params.toString()}`);
-      setItems(res.data ?? []);
-      setTotal(res.meta?.total ?? res.data?.length ?? 0);
+      const res = await apiClient.getWithMeta<InboxItem[]>(
+        `/inbox?${params.toString()}`
+      );
+      // Comments page lists comments/mentions (+ our replies) — DMs live on the
+      // Messages page. Keep REPLY items so they can thread under their parent.
+      const comments = (res.data ?? []).filter(
+        (it) => it.type !== InboxItemType.DIRECT_MESSAGE
+      );
+      setItems(comments);
+      setTotal(comments.filter((it) => it.type !== InboxItemType.REPLY).length);
     } catch (err) {
       console.error('Failed to fetch inbox:', err);
       setError('Failed to load inbox. Please try again.');
@@ -717,45 +585,15 @@ export default function CommentsPage(): React.JSX.Element {
     ];
   }, [stats]);
 
-  // ── Select an item → load thread, auto-mark READ ────────────────────────────
-  const selectItem = React.useCallback(
-    async (item: InboxItem) => {
-      setSelectedId(item.id);
-      setThreadLoading(true);
-      setThread(null);
-      try {
-        const full = await apiClient.get<InboxItem>(`/inbox/${item.id}`);
-        setThread(full);
-        if (item.status === InboxItemStatus.UNREAD) {
-          void apiClient
-            .patch<InboxItem>(`/inbox/${item.id}/status`, {
-              status: InboxItemStatus.READ,
-            })
-            .then(() => {
-              setItems((prev) =>
-                prev.map((it) =>
-                  it.id === item.id ? { ...it, status: InboxItemStatus.READ } : it
-                )
-              );
-              void fetchStats();
-            })
-            .catch(() => {});
-        }
-      } catch (err) {
-        console.error('Failed to load thread:', err);
-      } finally {
-        setThreadLoading(false);
-      }
-    },
-    [fetchStats]
-  );
-
   // ── Sync ────────────────────────────────────────────────────────────────────
   async function handleSync(): Promise<void> {
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const res = await apiClient.post<{ synced: number; message: string }>('/inbox/sync', {});
+      const res = await apiClient.post<{ synced: number; message: string }>(
+        '/inbox/sync',
+        {}
+      );
       setSyncMessage(res.message);
       await Promise.all([fetchItems(), fetchStats()]);
     } catch (err) {
@@ -769,50 +607,109 @@ export default function CommentsPage(): React.JSX.Element {
     }
   }
 
-  // ── Reply appended to thread ────────────────────────────────────────────────
-  function handleReplied(reply: InboxItem): void {
-    setThread((prev) =>
-      prev ? { ...prev, replies: [...(prev.replies ?? []), reply] } : prev
-    );
-    if (selectedId) {
-      setItems((prev) =>
-        prev.map((it) =>
-          it.id === selectedId ? { ...it, status: InboxItemStatus.REPLIED } : it
-        )
+  // ── Reply (throws so the comment row can show an inline error) ───────────────
+  const handleReply = React.useCallback(
+    async (parent: InboxItem, text: string): Promise<void> => {
+      const reply = await apiClient.post<InboxItem>(
+        `/inbox/${parent.id}/reply`,
+        { text }
       );
-    }
-    void fetchStats();
-  }
-
-  // ── Archive current thread ──────────────────────────────────────────────────
-  async function handleArchive(): Promise<void> {
-    if (!selectedId) return;
-    try {
-      await apiClient.patch<InboxItem>(`/inbox/${selectedId}/status`, {
-        status: InboxItemStatus.ARCHIVED,
-      });
-      setItems((prev) =>
-        prev.map((it) =>
-          it.id === selectedId ? { ...it, status: InboxItemStatus.ARCHIVED } : it
-        )
-      );
+      setItems((prev) => [
+        ...prev.map((it) =>
+          it.id === parent.id
+            ? { ...it, status: InboxItemStatus.REPLIED }
+            : it
+        ),
+        reply,
+      ]);
       void fetchStats();
-    } catch (err) {
-      console.error('Failed to archive:', err);
-    }
-  }
+    },
+    [fetchStats]
+  );
 
-  // ── Delete an inbox item ────────────────────────────────────────────────────
-  function handleDeleted(id: string, isThreadRoot: boolean): void {
-    setItems((prev) => prev.filter((it) => it.id !== id));
-    if (isThreadRoot) {
-      setSelectedId(null);
-      setThread(null);
-    }
-    void fetchStats();
-  }
+  // ── Delete ──────────────────────────────────────────────────────────────────
+  const handleDelete = React.useCallback(
+    async (item: InboxItem): Promise<void> => {
+      if (!window.confirm('Bu yorumu silmek istediğinize emin misiniz?')) return;
+      setDeletingId(item.id);
+      setNotice(null);
+      try {
+        const result = await apiClient.delete<InboxDeleteResult>(
+          `/inbox/${item.id}`
+        );
+        // Drop the item and any replies that threaded under it.
+        setItems((prev) =>
+          prev.filter(
+            (it) =>
+              it.id !== item.id &&
+              it.parentPlatformId !== item.platformItemId
+          )
+        );
+        if (!result.platform.supported || !result.platform.success) {
+          const reason =
+            result.platform.message ?? 'platform bu işlemi desteklemiyor';
+          setNotice(`Panelden silindi, ancak platformdan silinemedi: ${reason}`);
+        }
+      } catch (err) {
+        setNotice(
+          err instanceof ApiRequestError
+            ? err.message
+            : 'Silme işlemi başarısız oldu. Lütfen tekrar deneyin.'
+        );
+      } finally {
+        setDeletingId(null);
+        void fetchStats();
+      }
+    },
+    [fetchStats]
+  );
 
-  const hasItems = items.length > 0;
+  // ── Archive ───────────────────────────────────────────────────────────────
+  const handleArchive = React.useCallback(
+    async (item: InboxItem): Promise<void> => {
+      try {
+        await apiClient.patch<InboxItem>(`/inbox/${item.id}/status`, {
+          status: InboxItemStatus.ARCHIVED,
+        });
+        // If we're not explicitly viewing archived items, remove it from view.
+        setItems((prev) =>
+          statusFilter === InboxItemStatus.ARCHIVED
+            ? prev.map((it) =>
+                it.id === item.id
+                  ? { ...it, status: InboxItemStatus.ARCHIVED }
+                  : it
+              )
+            : prev.filter((it) => it.id !== item.id)
+        );
+        void fetchStats();
+      } catch (err) {
+        console.error('Failed to archive:', err);
+      }
+    },
+    [statusFilter, fetchStats]
+  );
+
+  // ── Mark read ───────────────────────────────────────────────────────────────
+  const handleMarkRead = React.useCallback(
+    (item: InboxItem): void => {
+      void apiClient
+        .patch<InboxItem>(`/inbox/${item.id}/status`, {
+          status: InboxItemStatus.READ,
+        })
+        .then(() => {
+          setItems((prev) =>
+            prev.map((it) =>
+              it.id === item.id ? { ...it, status: InboxItemStatus.READ } : it
+            )
+          );
+          void fetchStats();
+        })
+        .catch(() => {});
+    },
+    [fetchStats]
+  );
+
+  const hasItems = groups.length > 0;
 
   return (
     <div className="space-y-5">
@@ -822,19 +719,23 @@ export default function CommentsPage(): React.JSX.Element {
           <h1 className="text-2xl font-bold text-slate-900">Comments</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             {loading
-              ? 'Loading inbox...'
-              : `${total} item${total !== 1 ? 's' : ''}`}
+              ? 'Loading comments...'
+              : `${total} comment${total !== 1 ? 's' : ''}`}
             {stats && stats.unread > 0 && (
               <>
                 {' · '}
-                <span className="font-medium text-blue-600">{stats.unread} unread</span>
+                <span className="font-medium text-blue-600">
+                  {stats.unread} unread
+                </span>
               </>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {syncMessage !== null && (
-            <span className="hidden text-xs text-slate-500 sm:inline">{syncMessage}</span>
+            <span className="hidden text-xs text-slate-500 sm:inline">
+              {syncMessage}
+            </span>
           )}
           <Button
             size="sm"
@@ -881,7 +782,20 @@ export default function CommentsPage(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Error */}
+      {/* Notices */}
+      {notice !== null && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="ml-auto shrink-0 text-xs underline hover:no-underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {error !== null && (
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <AlertCircle className="h-4 w-4 shrink-0" />
@@ -896,99 +810,55 @@ export default function CommentsPage(): React.JSX.Element {
         </div>
       )}
 
-      {/* Two-pane inbox */}
-      <div className="flex h-[calc(100vh-19rem)] min-h-[420px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        {/* LEFT: list */}
-        <div
-          className={cn(
-            'flex w-full flex-col border-r border-slate-100 md:w-80 lg:w-96 md:shrink-0',
-            selectedId !== null && 'hidden md:flex'
-          )}
-        >
-          {loading ? (
-            <div className="flex flex-1 items-center justify-center">
-              <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
-            </div>
-          ) : hasItems ? (
-            <div className="flex-1 overflow-y-auto">
-              {groups.map((group) => {
-                const collapsed = collapsedGroups.has(group.key);
-                const unread = group.items.filter(
-                  (it) => it.status === InboxItemStatus.UNREAD
-                ).length;
-                return (
-                  <div key={group.key}>
-                    <PostGroupHeader
-                      group={group}
-                      expanded={!collapsed}
-                      unread={unread}
-                      onToggle={() => toggleGroup(group.key)}
-                    />
-                    {!collapsed &&
-                      group.items.map((item) => (
-                        <ListRow
-                          key={item.id}
-                          item={item}
-                          active={item.id === selectedId}
-                          onSelect={() => void selectItem(item)}
-                        />
-                      ))}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
-                <InboxIcon className="h-7 w-7 text-slate-400" />
-              </div>
-              <p className="text-sm font-medium text-slate-600">Your inbox is empty</p>
-              <p className="mt-1 max-w-[260px] text-xs text-slate-400">
-                Connect a social account, then press Sync to pull in comments,
-                mentions and messages.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-4 gap-1.5"
-                disabled={syncing}
-                onClick={() => void handleSync()}
-              >
-                {syncing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                Sync now
-              </Button>
-            </div>
-          )}
+      {/* Feed */}
+      {loading ? (
+        <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white py-20">
+          <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
         </div>
-
-        {/* RIGHT: thread */}
-        <div
-          className={cn(
-            'flex min-w-0 flex-1 flex-col',
-            selectedId === null && 'hidden md:flex'
-          )}
-        >
-          <ThreadPane
-            thread={thread}
-            loading={threadLoading}
-            onBack={() => {
-              setSelectedId(null);
-              setThread(null);
-            }}
-            onReplied={handleReplied}
-            onArchive={() => void handleArchive()}
-            onDeleted={handleDeleted}
-          />
+      ) : hasItems ? (
+        <div className="mx-auto max-w-2xl space-y-5">
+          {groups.map((group) => (
+            <PostCard
+              key={group.key}
+              group={group}
+              deletingId={deletingId}
+              onReply={handleReply}
+              onDelete={(it) => void handleDelete(it)}
+              onArchive={(it) => void handleArchive(it)}
+              onMarkRead={handleMarkRead}
+            />
+          ))}
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-10 text-center">
+          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
+            <InboxIcon className="h-7 w-7 text-slate-400" />
+          </div>
+          <p className="text-sm font-medium text-slate-600">No comments yet</p>
+          <p className="mt-1 max-w-[280px] text-xs text-slate-400">
+            Connect a social account, then press Sync to pull in comments and
+            mentions on your posts.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-4 gap-1.5"
+            disabled={syncing}
+            onClick={() => void handleSync()}
+          >
+            {syncing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Sync now
+          </Button>
+        </div>
+      )}
 
       {/* Platform stat badges */}
       {stats && stats.byPlatform.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-2">
           {stats.byPlatform.map((p) => (
             <button
               key={p.platform}
@@ -1003,7 +873,11 @@ export default function CommentsPage(): React.JSX.Element {
                   : 'border-slate-200 bg-white hover:bg-slate-50'
               )}
             >
-              <PlatformIcon platform={toPlatformIcon(p.platform)} size="sm" className="h-4 w-4 rounded-md" />
+              <PlatformIcon
+                platform={toPlatformIcon(p.platform)}
+                size="sm"
+                className="h-4 w-4 rounded-md"
+              />
               <span className="font-medium text-slate-700">{p.total}</span>
               {p.unread > 0 && (
                 <Badge variant="blue" className="px-1.5 py-0 text-[10px]">
