@@ -328,6 +328,14 @@ model InboxItem {
 
   text            String?
   permalink       String?
+
+  // Snapshot of the post the interaction belongs to (comments/mentions), so the
+  // inbox UI can show "which post" without an extra platform lookup. Captured
+  // best-effort during sync.
+  postPreviewText     String?
+  postPreviewImageUrl String?
+  postPermalink       String?
+
   // True when the item was authored by the connected account (e.g. our reply),
   // false for incoming items from the audience.
   isOutbound      Boolean         @default(false)

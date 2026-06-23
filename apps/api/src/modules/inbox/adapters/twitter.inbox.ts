@@ -20,6 +20,7 @@ import type {
 export class TwitterInboxAdapter implements PlatformInboxAdapter {
   readonly platform = SocialPlatform.TWITTER;
   readonly canReply = true;
+  readonly canDelete = false;
 
   private readonly logger = new Logger(TwitterInboxAdapter.name);
   private readonly apiBase = "https://api.twitter.com/2";

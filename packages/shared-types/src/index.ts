@@ -89,6 +89,11 @@ export interface InboxItem {
   authorAvatarUrl: string | null;
   text: string | null;
   permalink: string | null;
+  // Snapshot of the post this interaction belongs to (comments/mentions), so
+  // the inbox can group by post and show which post a comment is on.
+  postPreviewText: string | null;
+  postPreviewImageUrl: string | null;
+  postPermalink: string | null;
   isOutbound: boolean;
   platformCreatedAt: string | null;
   createdAt: string;
@@ -102,6 +107,32 @@ export interface InboxItem {
   };
   // Threaded replies (populated on the thread endpoint).
   replies?: InboxItem[];
+}
+
+/**
+ * Outcome of attempting a platform-side action (delete/unpublish) for one
+ * target. `supported: false` means the platform API offers no such capability
+ * (e.g. Instagram/TikTok cannot delete published media) — distinct from an
+ * attempt that was made and failed (`supported: true, success: false`).
+ */
+export interface PlatformActionResult {
+  platform: SocialPlatform;
+  success: boolean;
+  supported: boolean;
+  message?: string | null;
+}
+
+/** Returned by DELETE /posts/:id — local deletion always happens; platform
+ * deletion is best-effort and reported per target. */
+export interface PostDeleteResult {
+  deleted: boolean;
+  platformResults: PlatformActionResult[];
+}
+
+/** Returned by DELETE /inbox/:id — local deletion plus platform outcome. */
+export interface InboxDeleteResult {
+  deleted: boolean;
+  platform: PlatformActionResult;
 }
 
 export interface InboxStats {

@@ -19,6 +19,7 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
+import { PostDeleteResult } from "@social-pro/shared-types";
 import { CurrentAgency } from "../common/decorators/current-agency.decorator";
 import { CurrentUser, AuthenticatedUser } from "../common/decorators/current-user.decorator";
 import { RolesGuard } from "../common/guards/roles.guard";
@@ -166,7 +167,7 @@ export class PostController {
   // ---------------------------------------------------------------------------
 
   @Delete(":id")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Delete a post",
     description:
@@ -174,13 +175,16 @@ export class PostController {
       "If the post is SCHEDULED, the scheduled job is also cancelled.",
   })
   @ApiParam({ name: "id", description: "Post ID" })
-  @ApiResponse({ status: 204, description: "Post deleted" })
+  @ApiResponse({
+    status: 200,
+    description: "Post deleted (with per-platform deletion results)",
+  })
   @ApiResponse({ status: 401, description: "Unauthenticated" })
   @ApiResponse({ status: 404, description: "Post not found" })
   async remove(
     @CurrentAgency() agencyId: string,
     @Param("id") postId: string
-  ): Promise<void> {
+  ): Promise<PostDeleteResult> {
     return this.postService.remove(agencyId, postId);
   }
 

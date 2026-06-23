@@ -23,6 +23,7 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
 
   readonly platform = SocialPlatform.INSTAGRAM;
   readonly canReply = true;
+  readonly canDelete = true;
 
   // Caps to keep a single sync fast and bounded.
   private readonly mediaLimit = 15;
@@ -52,11 +53,17 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
     const items: FetchedInboxItem[] = [];
 
     // 1. List recent media for the IG user.
-    type Media = { id: string; permalink?: string; caption?: string };
+    type Media = {
+      id: string;
+      permalink?: string;
+      caption?: string;
+      media_url?: string;
+      thumbnail_url?: string;
+    };
     let media: Media[] = [];
     try {
       const params = new URLSearchParams({
-        fields: "id,permalink,caption",
+        fields: "id,permalink,caption,media_url,thumbnail_url",
         limit: String(this.mediaLimit),
         access_token: account.accessToken,
       });
@@ -123,6 +130,9 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
             permalink: m.permalink ?? null,
             authorUsername: c.username ?? null,
             text: c.text ?? null,
+            postPreviewText: m.caption ?? null,
+            postPreviewImageUrl: m.media_url ?? m.thumbnail_url ?? null,
+            postPermalink: m.permalink ?? null,
             platformCreatedAt: c.timestamp ? new Date(c.timestamp) : null,
             raw: c as unknown as Record<string, unknown>,
           });
@@ -137,6 +147,9 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
               permalink: m.permalink ?? null,
               authorUsername: r.username ?? null,
               text: r.text ?? null,
+              postPreviewText: m.caption ?? null,
+              postPreviewImageUrl: m.media_url ?? m.thumbnail_url ?? null,
+              postPermalink: m.permalink ?? null,
               platformCreatedAt: r.timestamp ? new Date(r.timestamp) : null,
               raw: r as unknown as Record<string, unknown>,
             });
@@ -315,5 +328,26 @@ export class InstagramInboxAdapter implements PlatformInboxAdapter {
 
     const data = (await resp.json()) as { id: string };
     return { platformItemId: data.id, createdAt: new Date() };
+  }
+
+  async deleteItem(
+    platformItemId: string,
+    account: InboxAccount,
+    context: { type: string; platformPostId?: string | null },
+  ): Promise<void> {
+    if (context.type === "DIRECT_MESSAGE") {
+      throw new Error("Deleting direct messages is not supported.");
+    }
+
+    const params = new URLSearchParams({ access_token: account.accessToken });
+    const resp = await fetch(
+      `https://graph.facebook.com/${this.apiVersion}/${platformItemId}?${params.toString()}`,
+      { method: "DELETE" },
+    );
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Instagram delete failed: ${body}`);
+    }
   }
 }

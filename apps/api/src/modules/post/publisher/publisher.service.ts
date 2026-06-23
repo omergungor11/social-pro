@@ -1,5 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Post, PostMedia, PostTarget, SocialAccount, SocialPlatform } from "@social-pro/prisma";
+import {
+  PlatformActionResult,
+  SocialPlatform as SharedSocialPlatform,
+} from "@social-pro/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { EncryptionService } from "../../social-account/services/encryption.service";
 import {
@@ -139,16 +143,26 @@ export class PublisherService {
    * platform adapter to delete it. Failures are logged but never thrown — the
    * caller (post deletion) must not be blocked by a remote API error.
    */
-  async unpublishPost(post: PostWithRelations): Promise<void> {
+  async unpublishPost(post: PostWithRelations): Promise<PlatformActionResult[]> {
     const publishedTargets = post.targets.filter((t) => t.platformPostId);
+    const results: PlatformActionResult[] = [];
 
     for (const target of publishedTargets) {
-      const adapter = this.adapters.get(target.socialAccount.platform);
+      const prismaPlatform = target.socialAccount.platform;
+      const platform = prismaPlatform as unknown as SharedSocialPlatform;
+      const adapter = this.adapters.get(prismaPlatform);
+
       if (!adapter?.unpublish) {
         this.logger.debug(
-          `Skipping platform deletion for ${target.socialAccount.platform} ` +
+          `Skipping platform deletion for ${platform} ` +
             `(no unpublish support) target=${target.id}`
         );
+        results.push({
+          platform,
+          success: false,
+          supported: false,
+          message: `${platform} API does not support deleting published posts.`,
+        });
         continue;
       }
 
@@ -156,17 +170,21 @@ export class PublisherService {
         const decrypted = this.decryptAccount(target.socialAccount);
         await adapter.unpublish(target.platformPostId!, decrypted);
         this.logger.log(
-          `Deleted from platform: platform=${target.socialAccount.platform} ` +
+          `Deleted from platform: platform=${platform} ` +
             `platformPostId=${target.platformPostId}`
         );
+        results.push({ platform, success: true, supported: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
-          `Failed to delete from ${target.socialAccount.platform} ` +
+          `Failed to delete from ${platform} ` +
             `(platformPostId=${target.platformPostId}): ${message}`
         );
+        results.push({ platform, success: false, supported: true, message });
       }
     }
+
+    return results;
   }
 
   // ---------------------------------------------------------------------------

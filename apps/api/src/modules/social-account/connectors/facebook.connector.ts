@@ -22,13 +22,18 @@ export class FacebookConnector implements OAuthConnector {
   private readonly tokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token`;
   private readonly longLivedTokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token`;
   private readonly profileUrl = "https://graph.facebook.com/me";
+  // Default scopes requested on connect. These are granted with standard
+  // access. `pages_messaging` is intentionally NOT here: it is an "advanced
+  // access" permission that requires the Messenger product + App Review on the
+  // Facebook app. Forcing it on an app that hasn't been approved makes Facebook
+  // reject the whole login with "Invalid Scopes: pages_messaging". Once the app
+  // is approved, add it back via the OAuth config (credentials.scopes).
   private readonly scopes = [
     "public_profile",
     "pages_show_list",
     "pages_read_engagement",
     "pages_manage_posts",
     "pages_manage_metadata",
-    "pages_messaging",
     "business_management",
   ];
 
@@ -37,13 +42,14 @@ export class FacebookConnector implements OAuthConnector {
     redirectUri: string,
     credentials: OAuthCredentials,
   ): string {
-    const baseScopes =
+    // Use the configured scopes if provided, otherwise the safe defaults.
+    // pages_messaging is opt-in via credentials.scopes once the Facebook app
+    // has it approved — it is no longer force-injected, because an unapproved
+    // app rejects the entire login with "Invalid Scopes: pages_messaging".
+    const effectiveScopes =
       credentials.scopes && credentials.scopes.length > 0
         ? credentials.scopes
         : this.scopes;
-    // Always include pages_messaging so DM access can be granted even when the
-    // stored OAuth config predates it.
-    const effectiveScopes = Array.from(new Set([...baseScopes, "pages_messaging"]));
 
     const params = new URLSearchParams({
       client_id: credentials.clientId,

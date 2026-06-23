@@ -33,6 +33,10 @@ export interface FetchedInboxItem {
   authorAvatarUrl?: string | null;
   text?: string | null;
   permalink?: string | null;
+  /** Snapshot of the post this interaction belongs to (comments/mentions). */
+  postPreviewText?: string | null;
+  postPreviewImageUrl?: string | null;
+  postPermalink?: string | null;
   /** True when authored by the connected account itself (our own reply). */
   isOutbound?: boolean;
   platformCreatedAt?: Date | null;
@@ -86,4 +90,20 @@ export interface PlatformInboxAdapter {
 
   /** Whether this adapter can post replies given current API access. */
   readonly canReply: boolean;
+
+  /**
+   * Deletes an interaction (typically a comment) from the platform.
+   * Only implemented by adapters whose platform API supports it. When present,
+   * `canDelete` must be true.
+   * @throws Error with a descriptive, user-facing message when the platform
+   *   API rejects the request.
+   */
+  deleteItem?(
+    platformItemId: string,
+    account: InboxAccount,
+    context: { type: string; platformPostId?: string | null },
+  ): Promise<void>;
+
+  /** Whether this adapter can delete items (comments) given current API access. */
+  readonly canDelete: boolean;
 }

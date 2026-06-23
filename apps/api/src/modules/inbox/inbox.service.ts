@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  BadGatewayException,
+} from "@nestjs/common";
 import {
   InboxItem,
   InboxItemStatus,
@@ -7,12 +13,18 @@ import {
   SocialAccount,
   SocialPlatform,
 } from "@social-pro/prisma";
+import type {
+  InboxDeleteResult,
+  PlatformActionResult,
+  SocialPlatform as SharedSocialPlatform,
+} from "@social-pro/shared-types";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { EncryptionService } from "../social-account/services/encryption.service";
 import {
   FetchedInboxItem,
   InboxAccount,
   PlatformInboxAdapter,
+  ReplyResult,
 } from "./adapters/inbox-adapter.interface";
 import { FacebookInboxAdapter } from "./adapters/facebook.inbox";
 import { InstagramInboxAdapter } from "./adapters/instagram.inbox";
@@ -47,6 +59,9 @@ export interface InboxItemDto {
   authorAvatarUrl: string | null;
   text: string | null;
   permalink: string | null;
+  postPreviewText: string | null;
+  postPreviewImageUrl: string | null;
+  postPermalink: string | null;
   isOutbound: boolean;
   platformCreatedAt: string | null;
   createdAt: string;
@@ -194,6 +209,9 @@ export class InboxService {
             authorAvatarUrl: item.authorAvatarUrl ?? null,
             text: item.text ?? null,
             permalink: item.permalink ?? null,
+            postPreviewText: item.postPreviewText ?? null,
+            postPreviewImageUrl: item.postPreviewImageUrl ?? null,
+            postPermalink: item.postPermalink ?? null,
             isOutbound: item.isOutbound ?? false,
             platformCreatedAt: item.platformCreatedAt ?? null,
             raw: (item.raw ?? {}) as Prisma.InputJsonValue,
@@ -204,6 +222,9 @@ export class InboxService {
           update: {
             text: item.text ?? null,
             permalink: item.permalink ?? null,
+            postPreviewText: item.postPreviewText ?? null,
+            postPreviewImageUrl: item.postPreviewImageUrl ?? null,
+            postPermalink: item.postPermalink ?? null,
             authorName: item.authorName ?? null,
             authorUsername: item.authorUsername ?? null,
             authorAvatarUrl: item.authorAvatarUrl ?? null,
@@ -387,11 +408,23 @@ export class InboxService {
     }
 
     const account = this.decryptAccount(item.socialAccount);
-    const result = await adapter.reply(item.platformItemId, body, account, {
-      type: item.type,
-      platformPostId: item.platformPostId,
-      authorPlatformId: item.authorPlatformId,
-    });
+    let result: ReplyResult;
+    try {
+      result = await adapter.reply(item.platformItemId, body, account, {
+        type: item.type,
+        platformPostId: item.platformPostId,
+        authorPlatformId: item.authorPlatformId,
+      });
+    } catch (err) {
+      // The platform call failed (expired token, closed 24h messaging window,
+      // unresolvable page id, invalid recipient, etc). Surface the real reason
+      // as a 502 instead of letting a plain Error become an opaque 500.
+      const reason = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Reply to ${item.platform} item ${item.id} failed: ${reason}`,
+      );
+      throw new BadGatewayException(reason);
+    }
 
     const [outbound] = await this.prisma.$transaction([
       this.prisma.inboxItem.create({
@@ -422,6 +455,69 @@ export class InboxService {
     ]);
 
     return this.toDto(outbound);
+  }
+
+  /**
+   * Deletes an interaction from the platform (best-effort) and locally. If the
+   * platform doesn't support deletion or the platform call fails, the item is
+   * still removed locally — mirroring the post-delete pattern.
+   */
+  async deleteItem(agencyId: string, itemId: string): Promise<InboxDeleteResult> {
+    const item = await this.prisma.inboxItem.findFirst({
+      where: { id: itemId, agencyId },
+      include: { socialAccount: true },
+    });
+    if (!item) throw new NotFoundException(`Inbox item '${itemId}' not found`);
+
+    const adapter = this.adapters.get(item.platform);
+    const sharedPlatform = item.platform as unknown as SharedSocialPlatform;
+
+    let platform: PlatformActionResult;
+    if (!adapter || !adapter.canDelete || !adapter.deleteItem) {
+      platform = {
+        platform: sharedPlatform,
+        success: false,
+        supported: false,
+        message: `Deleting on ${item.platform} is not supported.`,
+      };
+    } else {
+      const account = this.decryptAccount(item.socialAccount);
+      try {
+        await adapter.deleteItem(item.platformItemId, account, {
+          type: item.type,
+          platformPostId: item.platformPostId,
+        });
+        platform = { platform: sharedPlatform, success: true, supported: true };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Delete on ${item.platform} item ${item.id} failed: ${reason}`,
+        );
+        platform = {
+          platform: sharedPlatform,
+          success: false,
+          supported: true,
+          message: reason,
+        };
+      }
+    }
+
+    // Best-effort local cleanup: remove threaded replies, then the item itself.
+    try {
+      await this.prisma.inboxItem.deleteMany({
+        where: {
+          socialAccountId: item.socialAccountId,
+          parentPlatformId: item.platformItemId,
+        },
+      });
+    } catch (err) {
+      this.logger.debug(
+        `Failed to delete replies for inbox item ${item.id}: ${String(err)}`,
+      );
+    }
+    await this.prisma.inboxItem.delete({ where: { id: item.id } });
+
+    return { deleted: true, platform };
   }
 
   // ---------------------------------------------------------------------------
@@ -464,6 +560,9 @@ export class InboxService {
       authorAvatarUrl: item.authorAvatarUrl,
       text: item.text,
       permalink: item.permalink,
+      postPreviewText: item.postPreviewText,
+      postPreviewImageUrl: item.postPreviewImageUrl,
+      postPermalink: item.postPermalink,
       isOutbound: item.isOutbound,
       platformCreatedAt: item.platformCreatedAt ? item.platformCreatedAt.toISOString() : null,
       createdAt: item.createdAt.toISOString(),

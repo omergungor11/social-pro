@@ -10,6 +10,11 @@ import {
   ExternalLink,
   ArrowLeft,
   Archive,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  Image as ImageIcon,
+  MessageCircle,
 } from 'lucide-react';
 import {
   InboxItemType,
@@ -17,6 +22,7 @@ import {
   SocialPlatform,
   type InboxItem,
   type InboxStats,
+  type InboxDeleteResult,
 } from '@social-pro/shared-types';
 import { cn } from '@/lib/utils';
 import { apiClient, ApiRequestError } from '@/lib/api-client';
@@ -65,6 +71,68 @@ function accountLabel(item: InboxItem): string {
   const a = item.account;
   if (!a) return getPlatformLabel(toPlatformIcon(item.platform));
   return a.displayName ?? (a.username ? `@${a.username}` : getPlatformLabel(toPlatformIcon(item.platform)));
+}
+
+function hasPostContext(item: InboxItem): boolean {
+  return Boolean(
+    item.postPreviewText ||
+      item.postPreviewImageUrl ||
+      item.postPermalink ||
+      item.platformPostId
+  );
+}
+
+const UNGROUPED_KEY = '__direct__';
+
+interface InboxGroup {
+  key: string;
+  postPreviewText: string | null;
+  postPreviewImageUrl: string | null;
+  postPermalink: string | null;
+  platformPostId: string | null;
+  items: InboxItem[];
+}
+
+function groupByPost(items: InboxItem[]): InboxGroup[] {
+  const order: string[] = [];
+  const map = new Map<string, InboxGroup>();
+
+  for (const item of items) {
+    const key = item.platformPostId ?? UNGROUPED_KEY;
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        key,
+        postPreviewText: item.postPreviewText,
+        postPreviewImageUrl: item.postPreviewImageUrl,
+        postPermalink: item.postPermalink,
+        platformPostId: item.platformPostId,
+        items: [],
+      };
+      map.set(key, group);
+      order.push(key);
+    } else {
+      group.postPreviewText ??= item.postPreviewText;
+      group.postPreviewImageUrl ??= item.postPreviewImageUrl;
+      group.postPermalink ??= item.postPermalink;
+    }
+    group.items.push(item);
+  }
+
+  // Direct messages / ungrouped go to the top.
+  return order
+    .map((k) => map.get(k)!)
+    .sort((a, b) => {
+      if (a.key === UNGROUPED_KEY) return -1;
+      if (b.key === UNGROUPED_KEY) return 1;
+      return 0;
+    });
+}
+
+function groupCaption(group: InboxGroup): string {
+  if (group.postPreviewText) return group.postPreviewText;
+  if (group.platformPostId) return `Post ${group.platformPostId.slice(0, 8)}`;
+  return 'Post';
 }
 
 // ---------------------------------------------------------------------------
@@ -134,13 +202,77 @@ function ListRow({
 }
 
 // ---------------------------------------------------------------------------
+// Post group header (collapsible)
+// ---------------------------------------------------------------------------
+
+function PostGroupHeader({
+  group,
+  expanded,
+  unread,
+  onToggle,
+}: {
+  group: InboxGroup;
+  expanded: boolean;
+  unread: number;
+  onToggle: () => void;
+}): React.JSX.Element {
+  const isDirect = group.key === UNGROUPED_KEY;
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center gap-2.5 border-b border-slate-100 bg-slate-50/80 px-3 py-2 text-left transition-colors hover:bg-slate-100"
+    >
+      {expanded ? (
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+      ) : (
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+      )}
+      {isDirect ? (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-500">
+          <MessageCircle className="h-4 w-4" />
+        </div>
+      ) : group.postPreviewImageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={group.postPreviewImageUrl}
+          alt=""
+          className="h-8 w-8 shrink-0 rounded-lg border border-slate-200 object-cover"
+        />
+      ) : (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-500">
+          <ImageIcon className="h-4 w-4" />
+        </div>
+      )}
+      <p className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-700">
+        {isDirect ? 'Direct messages' : groupCaption(group)}
+      </p>
+      <span className="shrink-0 text-[11px] text-slate-400">{group.items.length}</span>
+      {unread > 0 && (
+        <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-label="Unread" />
+      )}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Thread message bubble
 // ---------------------------------------------------------------------------
 
-function MessageBubble({ item }: { item: InboxItem }): React.JSX.Element {
+function MessageBubble({
+  item,
+  onDelete,
+  deleting,
+}: {
+  item: InboxItem;
+  onDelete?: (item: InboxItem) => void;
+  deleting?: boolean;
+}): React.JSX.Element {
   const outbound = item.isOutbound;
+  const canDelete = !outbound && onDelete !== undefined;
   return (
-    <div className={cn('flex gap-3', outbound && 'flex-row-reverse')}>
+    <div className={cn('group flex gap-3', outbound && 'flex-row-reverse')}>
       <InboxAvatar
         name={item.authorName}
         username={item.authorUsername}
@@ -154,15 +286,33 @@ function MessageBubble({ item }: { item: InboxItem }): React.JSX.Element {
           </span>
           <span className="text-[11px] text-slate-400">{relativeTime(bestTime(item))}</span>
         </div>
-        <div
-          className={cn(
-            'mt-1 inline-block rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap',
-            outbound
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-100 text-slate-800'
+        <div className={cn('mt-1 flex items-center gap-1.5', outbound && 'flex-row-reverse')}>
+          <div
+            className={cn(
+              'inline-block rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap',
+              outbound
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 text-slate-800'
+            )}
+          >
+            {item.text ?? <span className="italic opacity-70">No text</span>}
+          </div>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete?.(item)}
+              disabled={deleting}
+              className="shrink-0 rounded-md p-1 text-slate-300 opacity-0 transition-colors hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Delete comment"
+              aria-label="Delete comment"
+            >
+              {deleting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+            </button>
           )}
-        >
-          {item.text ?? <span className="italic opacity-70">No text</span>}
         </div>
       </div>
     </div>
@@ -179,21 +329,28 @@ function ThreadPane({
   onBack,
   onReplied,
   onArchive,
+  onDeleted,
 }: {
   thread: InboxItem | null;
   loading: boolean;
   onBack: () => void;
   onReplied: (reply: InboxItem) => void;
   onArchive: () => void;
+  onDeleted: (id: string, isThreadRoot: boolean) => void;
 }): React.JSX.Element {
   const [text, setText] = React.useState('');
   const [sending, setSending] = React.useState(false);
   const [replyError, setReplyError] = React.useState<string | null>(null);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
+  const [deleteNotice, setDeleteNotice] = React.useState<string | null>(null);
+  const [localReplies, setLocalReplies] = React.useState<InboxItem[]>([]);
   const threadId = thread?.id ?? null;
 
   React.useEffect(() => {
     setText('');
     setReplyError(null);
+    setDeleteNotice(null);
+    setLocalReplies([]);
   }, [threadId]);
 
   if (loading) {
@@ -248,6 +405,37 @@ function ThreadPane({
     }
   }
 
+  async function handleDelete(item: InboxItem): Promise<void> {
+    if (!window.confirm('Bu yorumu silmek istediğinize emin misiniz?')) return;
+    setDeletingId(item.id);
+    setDeleteNotice(null);
+    try {
+      const result = await apiClient.delete<InboxDeleteResult>(`/inbox/${item.id}`);
+      const isThreadRoot = item.id === threadId;
+      if (!isThreadRoot) {
+        setLocalReplies((prev) => [...prev, item]);
+      }
+      if (!result.platform.supported || !result.platform.success) {
+        const reason = result.platform.message ?? 'platform bu işlemi desteklemiyor';
+        setDeleteNotice(`Panelden silindi, ancak platformdan silinemedi: ${reason}`);
+      }
+      onDeleted(item.id, isThreadRoot);
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        setDeleteNotice(err.message);
+      } else {
+        setDeleteNotice('Silme işlemi başarısız oldu. Lütfen tekrar deneyin.');
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const showPostCard = hasPostContext(thread);
+  const captionText = thread.postPreviewText;
+  const postLink = thread.postPermalink;
+  const removedReplyIds = new Set(localReplies.map((r) => r.id));
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Thread header */}
@@ -298,14 +486,92 @@ function ThreadPane({
         >
           <Archive className="h-4 w-4" />
         </button>
+        {!thread.isOutbound && (
+          <button
+            type="button"
+            onClick={() => void handleDelete(thread)}
+            disabled={deletingId === thread.id}
+            className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Delete comment"
+            aria-label="Delete comment"
+          >
+            {deletingId === thread.id ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </button>
+        )}
       </div>
+
+      {/* Post context card */}
+      {showPostCard && (
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
+          {thread.postPreviewImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={thread.postPreviewImageUrl}
+              alt=""
+              className="h-11 w-11 shrink-0 rounded-lg border border-slate-200 object-cover"
+            />
+          ) : (
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-slate-500">
+              <ImageIcon className="h-5 w-5" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+              Post
+            </p>
+            <p className="line-clamp-2 text-xs text-slate-600 leading-relaxed">
+              {captionText ?? (
+                <span className="italic text-slate-400">
+                  {thread.platformPostId
+                    ? `Post ${thread.platformPostId.slice(0, 8)}`
+                    : 'Post'}
+                </span>
+              )}
+            </p>
+          </div>
+          {postLink && (
+            <a
+              href={postLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 transition-colors hover:bg-blue-50"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              View post
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Delete notice */}
+      {deleteNotice !== null && (
+        <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{deleteNotice}</span>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <MessageBubble item={thread} />
-        {(thread.replies ?? []).map((reply) => (
-          <MessageBubble key={reply.id} item={reply} />
-        ))}
+        <MessageBubble
+          item={thread}
+          onDelete={(it) => void handleDelete(it)}
+          deleting={deletingId === thread.id}
+        />
+        {(thread.replies ?? [])
+          .filter((reply) => !removedReplyIds.has(reply.id))
+          .map((reply) => (
+            <MessageBubble
+              key={reply.id}
+              item={reply}
+              onDelete={(it) => void handleDelete(it)}
+              deleting={deletingId === reply.id}
+            />
+          ))}
       </div>
 
       {/* Reply box */}
@@ -380,6 +646,22 @@ export default function CommentsPage(): React.JSX.Element {
   // Sync
   const [syncing, setSyncing] = React.useState(false);
   const [syncMessage, setSyncMessage] = React.useState<string | null>(null);
+
+  // Collapsed post groups (keys that are collapsed; default = expanded)
+  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(
+    () => new Set()
+  );
+
+  const groups = React.useMemo(() => groupByPost(items), [items]);
+
+  const toggleGroup = React.useCallback((key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   // ── Fetch list ─────────────────────────────────────────────────────────────
   const fetchItems = React.useCallback(async () => {
@@ -520,6 +802,16 @@ export default function CommentsPage(): React.JSX.Element {
     }
   }
 
+  // ── Delete an inbox item ────────────────────────────────────────────────────
+  function handleDeleted(id: string, isThreadRoot: boolean): void {
+    setItems((prev) => prev.filter((it) => it.id !== id));
+    if (isThreadRoot) {
+      setSelectedId(null);
+      setThread(null);
+    }
+    void fetchStats();
+  }
+
   const hasItems = items.length > 0;
 
   return (
@@ -619,14 +911,31 @@ export default function CommentsPage(): React.JSX.Element {
             </div>
           ) : hasItems ? (
             <div className="flex-1 overflow-y-auto">
-              {items.map((item) => (
-                <ListRow
-                  key={item.id}
-                  item={item}
-                  active={item.id === selectedId}
-                  onSelect={() => void selectItem(item)}
-                />
-              ))}
+              {groups.map((group) => {
+                const collapsed = collapsedGroups.has(group.key);
+                const unread = group.items.filter(
+                  (it) => it.status === InboxItemStatus.UNREAD
+                ).length;
+                return (
+                  <div key={group.key}>
+                    <PostGroupHeader
+                      group={group}
+                      expanded={!collapsed}
+                      unread={unread}
+                      onToggle={() => toggleGroup(group.key)}
+                    />
+                    {!collapsed &&
+                      group.items.map((item) => (
+                        <ListRow
+                          key={item.id}
+                          item={item}
+                          active={item.id === selectedId}
+                          onSelect={() => void selectItem(item)}
+                        />
+                      ))}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
@@ -672,6 +981,7 @@ export default function CommentsPage(): React.JSX.Element {
             }}
             onReplied={handleReplied}
             onArchive={() => void handleArchive()}
+            onDeleted={handleDeleted}
           />
         </div>
       </div>

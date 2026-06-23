@@ -74,5 +74,24 @@
         ]
       }
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "context7",
+    "memory",
+    "executeautomation-playwright-server",
+    "supabase",
+    "postgresql",
+    "fetch",
+    "chrome-devtools",
+    "github",
+    "filesystem",
+    "mysql",
+    "notionApi",
+    "postman-api-http-server",
+    "google-ads",
+    "firecrawl-mcp",
+    "MongoDB",
+    "stripe",
+    "elevenlabs"
+  ]
 }

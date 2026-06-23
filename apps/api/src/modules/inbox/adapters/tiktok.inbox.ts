@@ -19,6 +19,7 @@ import type {
 export class TikTokInboxAdapter implements PlatformInboxAdapter {
   readonly platform = SocialPlatform.TIKTOK;
   readonly canReply = false;
+  readonly canDelete = false;
 
   private readonly logger = new Logger(TikTokInboxAdapter.name);
 

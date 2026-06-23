@@ -23,6 +23,7 @@ export class FacebookInboxAdapter implements PlatformInboxAdapter {
 
   readonly platform = SocialPlatform.FACEBOOK;
   readonly canReply = true;
+  readonly canDelete = true;
 
   // Caps to keep a single sync fast and bounded.
   private readonly postLimit = 15;
@@ -32,11 +33,16 @@ export class FacebookInboxAdapter implements PlatformInboxAdapter {
     const items: FetchedInboxItem[] = [];
 
     // 1. List recent Page posts.
-    type Post = { id: string; permalink_url?: string };
+    type Post = {
+      id: string;
+      permalink_url?: string;
+      message?: string;
+      full_picture?: string;
+    };
     let posts: Post[] = [];
     try {
       const params = new URLSearchParams({
-        fields: "id,permalink_url",
+        fields: "id,permalink_url,message,full_picture",
         limit: String(this.postLimit),
         access_token: account.accessToken,
       });
@@ -97,6 +103,9 @@ export class FacebookInboxAdapter implements PlatformInboxAdapter {
             authorPlatformId: c.from?.id ?? null,
             authorName: c.from?.name ?? null,
             text: c.message ?? null,
+            postPreviewText: p.message ?? null,
+            postPreviewImageUrl: p.full_picture ?? null,
+            postPermalink: p.permalink_url ?? null,
             platformCreatedAt: c.created_time
               ? new Date(c.created_time)
               : null,
@@ -241,5 +250,26 @@ export class FacebookInboxAdapter implements PlatformInboxAdapter {
 
     const data = (await resp.json()) as { id: string };
     return { platformItemId: data.id };
+  }
+
+  async deleteItem(
+    platformItemId: string,
+    account: InboxAccount,
+    context: { type: string; platformPostId?: string | null },
+  ): Promise<void> {
+    if (context.type === "DIRECT_MESSAGE") {
+      throw new Error("Deleting direct messages is not supported.");
+    }
+
+    const params = new URLSearchParams({ access_token: account.accessToken });
+    const resp = await fetch(
+      `https://graph.facebook.com/${this.apiVersion}/${platformItemId}?${params.toString()}`,
+      { method: "DELETE" },
+    );
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Facebook delete failed: ${body}`);
+    }
   }
 }

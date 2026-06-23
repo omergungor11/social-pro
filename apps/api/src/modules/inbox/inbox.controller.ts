@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -11,6 +12,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
+import type { InboxDeleteResult } from "@social-pro/shared-types";
 import { CurrentAgency } from "../common/decorators/current-agency.decorator";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { InboxService, InboxItemDto } from "./inbox.service";
@@ -74,6 +76,17 @@ export class InboxController {
     @Body() body: ReplyDto,
   ): Promise<InboxItemDto> {
     return this.inboxService.reply(agencyId, id, body.text);
+  }
+
+  @Delete(":id")
+  @ApiOperation({ summary: "Delete an interaction from the platform and inbox" })
+  @ApiParam({ name: "id" })
+  @ApiResponse({ status: 200, description: "Item deleted (platform delete is best-effort)" })
+  async remove(
+    @CurrentAgency() agencyId: string,
+    @Param("id") id: string,
+  ): Promise<InboxDeleteResult> {
+    return this.inboxService.deleteItem(agencyId, id);
   }
 
   @Patch(":id/status")

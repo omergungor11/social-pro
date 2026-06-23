@@ -88,6 +88,25 @@ export class LinkedInPublisher implements PlatformPublisher {
     };
   }
 
+  /** Deletes a published UGC post from the member's feed by its URN. */
+  async unpublish(platformPostId: string, account: DecryptedAccount): Promise<void> {
+    const encodedUrn = encodeURIComponent(platformPostId);
+    const response = await fetch(`${this.apiBase}/ugcPosts/${encodedUrn}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${account.accessToken}`,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`LinkedIn delete error ${response.status}: ${errorBody}`);
+    }
+
+    this.logger.log(`LinkedIn post deleted: platformPostId=${platformPostId}`);
+  }
+
   private buildText(content: PublishContent): string {
     let text = content.text;
 

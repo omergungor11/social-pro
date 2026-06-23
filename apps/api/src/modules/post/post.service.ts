@@ -12,6 +12,7 @@ import {
   PostTarget,
   SocialAccount,
 } from "@social-pro/prisma";
+import { PostDeleteResult } from "@social-pro/shared-types";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { PaginatedResponseDto } from "../common/dto/pagination.dto";
 import { CreatePostDto, PostMediaInputDto } from "./dto/create-post.dto";
@@ -251,16 +252,15 @@ export class PostService {
   // Remove
   // ---------------------------------------------------------------------------
 
-  async remove(agencyId: string, postId: string): Promise<void> {
+  async remove(agencyId: string, postId: string): Promise<PostDeleteResult> {
     const post = await this.assertExists(agencyId, postId);
 
     if (post.status === PostStatus.SCHEDULED) {
       await this.scheduler.cancelScheduledPost(postId);
     }
 
-    // Best-effort: delete the post from every platform it was published to,
-    // before removing it from our database. Remote failures are logged but do
-    // not block local deletion.
+    // Delete the post from every platform it was published to, before removing
+    // it from our database, and report the per-platform outcome to the caller.
     const fullPost = await this.prisma.post.findFirst({
       where: { id: postId, agencyId },
       include: {
@@ -268,12 +268,14 @@ export class PostService {
         targets: { include: { socialAccount: true } },
       },
     });
-    if (fullPost) {
-      await this.publisher.unpublishPost(fullPost);
-    }
+    const platformResults = fullPost
+      ? await this.publisher.unpublishPost(fullPost)
+      : [];
 
     await this.prisma.post.delete({ where: { id: postId } });
     this.logger.log(`Post deleted: id=${postId} agencyId=${agencyId}`);
+
+    return { deleted: true, platformResults };
   }
 
   // ---------------------------------------------------------------------------

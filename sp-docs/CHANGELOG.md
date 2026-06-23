@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-06-23
+
+### Added
+- Yorum silme: inbox adapter'larina `deleteItem` + `canDelete` eklendi (FB/IG destekler; Twitter/LinkedIn/TikTok desteklemez). `DELETE /inbox/:id` endpoint'i `InboxDeleteResult` donduruyor. Frontend'de cop kutusu butonu + onay + partial-failure uyarisi.
+- Inbox UI: yorumlar gonderiye gore gruplandi (acilir-kapanir post basliklari, thumbnail + caption), thread'de "post baglam karti" (gorsel + metin + View post linki). Post onizleme verisi (`postPreviewText/ImageUrl/Permalink`) sync sirasinda yakalaniyor — InboxItem'a 3 kolon + migration eklendi.
+- LinkedIn post silme (`unpublish`) implement edildi (DELETE /v2/ugcPosts/{urn}).
+
+### Fixed
+- Gonderi silme artik platform basina sonuc donduruyor: `DELETE /posts/:id` -> `{ deleted, platformResults }` (204 -> 200). IG/TikTok API silmeyi desteklemedigi icin kullaniciya "yerel silindi ama platformdan silinemedi" uyarisi gosteriliyor (onceden sessizce yutuluyordu).
+- DM yanit hatasi: adapter hatasi artik opak 500 yerine 502 + gercek platform mesaji olarak donuyor.
+- Facebook baglanma: `pages_messaging` scope'unun zorla enjekte edilmesi kaldirildi (opt-in yapildi) — onaysiz app'lerde "Invalid Scopes: pages_messaging" hatasiyla tum login'i bozuyordu.
+
 ## 2026-06-12
 
 ### Added

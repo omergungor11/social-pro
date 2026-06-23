@@ -22,6 +22,7 @@ import type {
 export class LinkedInInboxAdapter implements PlatformInboxAdapter {
   readonly platform = SocialPlatform.LINKEDIN;
   readonly canReply = false;
+  readonly canDelete = false;
 
   private readonly logger = new Logger(LinkedInInboxAdapter.name);
   private readonly apiBase = "https://api.linkedin.com";
