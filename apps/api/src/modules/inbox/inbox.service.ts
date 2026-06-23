@@ -40,6 +40,7 @@ export interface ListInboxFilters {
   platform?: SocialPlatform;
   socialAccountId?: string;
   clientId?: string;
+  platformPostId?: string;
   page?: number;
   limit?: number;
 }
@@ -273,6 +274,7 @@ export class InboxService {
       ...(filters.platform ? { platform: filters.platform } : {}),
       ...(filters.socialAccountId ? { socialAccountId: filters.socialAccountId } : {}),
       ...(filters.clientId ? { socialAccount: { clientId: filters.clientId } } : {}),
+      ...(filters.platformPostId ? { platformPostId: filters.platformPostId } : {}),
       // Top-level inbox shows incoming interactions; our own replies appear
       // nested under their parent in the thread view.
       isOutbound: false,

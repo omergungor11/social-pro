@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogFooter } from '@/components/ui/dialog';
 import { UploadZone, type UploadedFile } from '@/components/media/upload-zone';
 import { PostPreview, PLATFORM_CHAR_LIMITS } from '@/components/posts/post-preview';
+import { PostComments } from '@/components/inbox/post-comments';
 import {
   PlatformIcon, getPlatformLabel, PLATFORM_ACCENT, type Platform,
 } from '@/components/social/platform-icon';
@@ -43,6 +44,7 @@ interface PostTarget {
   publishedAt: string | null;
   errorMessage: string | null;
   socialAccountName: string;
+  platformPostId: string | null;
   metrics?: {
     likes: number;
     comments: number;
@@ -98,6 +100,7 @@ function mapApiPost(a: Record<string, unknown>): PostDetail {
       socialAccountName: (
         (socialAccount?.displayName ?? socialAccount?.platformUsername ?? '') as string
       ),
+      platformPostId: (t.platformPostId ?? null) as string | null,
       metrics: rawMetrics
         ? {
             likes: ((rawMetrics.likes ?? 0) as number),
@@ -1786,6 +1789,13 @@ export default function PostDetailPage(): React.JSX.Element {
             {post.targets.length > 0 && (
               <PlatformTargetsPanel targets={post.targets} />
             )}
+
+            {/* Comments on the published post */}
+            <PostComments
+              platformPostIds={post.targets
+                .map((t) => t.platformPostId)
+                .filter((id): id is string => Boolean(id))}
+            />
 
             {/* Activity timeline */}
             <ActivityTimeline entries={activityLog} />

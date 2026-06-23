@@ -29,6 +29,11 @@ export class ListInboxQueryDto {
   @IsString()
   clientId?: string;
 
+  @ApiPropertyOptional({ description: "Filter comments by the platform post id" })
+  @IsOptional()
+  @IsString()
+  platformPostId?: string;
+
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => (value != null ? Number(value) : undefined))
