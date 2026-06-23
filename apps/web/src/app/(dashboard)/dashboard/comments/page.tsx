@@ -456,21 +456,23 @@ function PostCard({
         )}
       </div>
 
-      {/* Post media */}
-      {!isUngrouped && group.postPreviewImageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={group.postPreviewImageUrl}
-          alt=""
-          className="max-h-96 w-full border-y border-slate-100 object-cover"
-        />
-      )}
-
-      {/* Post caption */}
-      {!isUngrouped && group.postPreviewText && (
-        <p className="whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed text-slate-700">
-          {group.postPreviewText}
-        </p>
+      {/* Post preview: medium image + short caption side by side */}
+      {!isUngrouped && (group.postPreviewImageUrl || group.postPreviewText) && (
+        <div className="flex items-start gap-4 px-4 pb-3">
+          {group.postPreviewImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={group.postPreviewImageUrl}
+              alt=""
+              className="h-40 w-40 shrink-0 rounded-lg border border-slate-200 object-cover"
+            />
+          )}
+          {group.postPreviewText && (
+            <p className="line-clamp-6 min-w-0 flex-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+              {group.postPreviewText}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Comment count divider */}
