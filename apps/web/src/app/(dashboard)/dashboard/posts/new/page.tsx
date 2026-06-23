@@ -30,7 +30,7 @@ import {
   getPlatformLabel,
   type Platform,
 } from '@/components/social/platform-icon';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, ApiRequestError } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -501,7 +501,13 @@ export default function NewPostPage(): React.JSX.Element {
       }, 1200);
     } catch (err) {
       console.error('Failed to schedule post:', err);
-      setToast({ message: 'Failed to schedule post. Please try again.', type: 'error' });
+      setToast({
+        message:
+          err instanceof ApiRequestError
+            ? err.message
+            : 'Failed to schedule post. Please try again.',
+        type: 'error',
+      });
       setSubmitting(false);
       setSubmitAction(null);
     }

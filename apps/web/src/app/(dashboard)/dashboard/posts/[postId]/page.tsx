@@ -21,7 +21,7 @@ import { PostComments } from '@/components/inbox/post-comments';
 import {
   PlatformIcon, getPlatformLabel, PLATFORM_ACCENT, type Platform,
 } from '@/components/social/platform-icon';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, ApiRequestError } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1331,14 +1331,29 @@ export default function PostDetailPage(): React.JSX.Element {
     setActionLoading(true);
     try {
       await apiClient.patch(`/posts/${post.id}`, buildPatchPayload());
-      const scheduledAt = new Date(`${date}T${time}`).toISOString();
-      await apiClient.post(`/posts/${post.id}/schedule`, { scheduledAt });
+      const parsed = new Date(`${date}T${time}`);
+      if (Number.isNaN(parsed.getTime())) {
+        showToast('Lütfen geçerli bir tarih ve saat seçin.', 'error');
+        return;
+      }
+      if (parsed.getTime() <= Date.now()) {
+        showToast('Zamanlama tarihi gelecekte olmalı.', 'error');
+        return;
+      }
+      await apiClient.post(`/posts/${post.id}/schedule`, {
+        scheduledAt: parsed.toISOString(),
+      });
       showToast('Post scheduled successfully', 'success');
       setScheduleOpen(false);
       void fetchPost();
     } catch (err) {
       console.error('Failed to schedule post:', err);
-      showToast('Failed to schedule post. Please try again.', 'error');
+      showToast(
+        err instanceof ApiRequestError
+          ? err.message
+          : 'Failed to schedule post. Please try again.',
+        'error'
+      );
     } finally {
       setActionLoading(false);
     }
