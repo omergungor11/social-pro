@@ -18,6 +18,12 @@ export interface PublishContent {
   mediaUrls?: string[];
   /** Platform-specific overrides from PostTarget.platformSpecificContent */
   platformOverrides?: Record<string, unknown>;
+  /** Optional place/location to attach (FB `place`, IG `location_id`). */
+  location?: { id: string; name?: string } | null;
+  /** Optional comment posted right after the main post (e.g. hashtags). */
+  firstComment?: string | null;
+  /** Usernames to tag (IG user_tags; FB best-effort). */
+  userTags?: string[];
   /** Raw content JSON from the Post model */
   raw: Record<string, unknown>;
 }

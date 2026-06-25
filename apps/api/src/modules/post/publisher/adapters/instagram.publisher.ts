@@ -67,10 +67,15 @@ export class InstagramPublisher implements PlatformPublisher {
 
     const creationId =
       images.length === 1
-        ? await this.createSingleContainer(userId, images[0]!, caption, account.accessToken)
-        : await this.createCarouselContainer(userId, images, caption, account.accessToken);
+        ? await this.createSingleContainer(userId, images[0]!, caption, content, account.accessToken)
+        : await this.createCarouselContainer(userId, images, caption, content, account.accessToken);
 
     const publishedId = await this.publishContainer(userId, creationId, account.accessToken);
+
+    // Best-effort: post the first comment (e.g. hashtags) right after publishing.
+    if (content.firstComment?.trim()) {
+      await this.postFirstComment(publishedId, content.firstComment.trim(), account.accessToken);
+    }
 
     return {
       platformPostId: publishedId,
@@ -87,11 +92,29 @@ export class InstagramPublisher implements PlatformPublisher {
     userId: string,
     imageUrl: string,
     caption: string,
+    content: PublishContent,
     accessToken: string
   ): Promise<string> {
     const params = new URLSearchParams();
     params.set("image_url", imageUrl);
     params.set("caption", caption);
+
+    // Optional location tag (Facebook Place page id).
+    if (content.location?.id) {
+      params.set("location_id", content.location.id);
+    }
+
+    // Optional user tags — only supported on single-image posts. Each tag needs
+    // a position; without a stored coordinate we center it (x=0.5, y=0.5).
+    if (content.userTags?.length) {
+      const tags = content.userTags.map((username) => ({
+        username: username.replace(/^@/, ""),
+        x: 0.5,
+        y: 0.5,
+      }));
+      params.set("user_tags", JSON.stringify(tags));
+    }
+
     params.set("access_token", accessToken);
 
     const container = await this.postContainer(userId, params);
@@ -102,6 +125,7 @@ export class InstagramPublisher implements PlatformPublisher {
     userId: string,
     imageUrls: string[],
     caption: string,
+    content: PublishContent,
     accessToken: string
   ): Promise<string> {
     // 1. Create a child container for each image (max 10).
@@ -120,6 +144,9 @@ export class InstagramPublisher implements PlatformPublisher {
     parentParams.set("media_type", "CAROUSEL");
     parentParams.set("children", childIds.join(","));
     parentParams.set("caption", caption);
+    if (content.location?.id) {
+      parentParams.set("location_id", content.location.id);
+    }
     parentParams.set("access_token", accessToken);
     const parent = await this.postContainer(userId, parentParams);
     return parent.id;
@@ -164,6 +191,36 @@ export class InstagramPublisher implements PlatformPublisher {
 
     const published = (await res.json()) as InstagramPublishResponse;
     return published.id;
+  }
+
+  /**
+   * Posts a comment on the freshly published media. Best-effort: a failure here
+   * must not fail the whole publish, so errors are logged and swallowed.
+   */
+  private async postFirstComment(
+    mediaId: string,
+    message: string,
+    accessToken: string
+  ): Promise<void> {
+    try {
+      const params = new URLSearchParams();
+      params.set("message", message);
+      params.set("access_token", accessToken);
+
+      const res = await fetch(`${this.apiBase}/${mediaId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.warn(`Instagram first comment failed ${res.status}: ${body}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Instagram first comment error: ${message}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

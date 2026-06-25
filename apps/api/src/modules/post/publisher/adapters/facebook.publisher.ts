@@ -48,13 +48,23 @@ export class FacebookPublisher implements PlatformPublisher {
       `Publishing to Facebook: pageId=${pageId} accountId=${account.id} images=${images.length}`
     );
 
+    const placeId = content.location?.id;
+
+    let result: PublishResult;
     if (images.length === 1) {
-      return this.publishSinglePhoto(pageId, message, images[0]!, account.accessToken);
+      result = await this.publishSinglePhoto(pageId, message, images[0]!, placeId, account.accessToken);
+    } else if (images.length > 1) {
+      result = await this.publishMultiPhoto(pageId, message, images, placeId, account.accessToken);
+    } else {
+      result = await this.publishText(pageId, message, content.link, placeId, account.accessToken);
     }
-    if (images.length > 1) {
-      return this.publishMultiPhoto(pageId, message, images, account.accessToken);
+
+    // Best-effort: post the first comment right after publishing.
+    if (content.firstComment?.trim()) {
+      await this.postFirstComment(result.platformPostId, content.firstComment.trim(), account.accessToken);
     }
-    return this.publishText(pageId, message, content.link, account.accessToken);
+
+    return result;
   }
 
   /** Deletes a published post (or photo story) from the Page. */
@@ -80,12 +90,14 @@ export class FacebookPublisher implements PlatformPublisher {
     pageId: string,
     message: string,
     link: string | undefined,
+    placeId: string | undefined,
     accessToken: string
   ): Promise<PublishResult> {
     const params = new URLSearchParams();
     params.set("message", message);
     params.set("access_token", accessToken);
     if (link) params.set("link", link);
+    if (placeId) params.set("place", placeId);
 
     const response = await fetch(`${this.apiBase}/${pageId}/feed`, {
       method: "POST",
@@ -106,6 +118,7 @@ export class FacebookPublisher implements PlatformPublisher {
     pageId: string,
     message: string,
     imageUrl: string,
+    placeId: string | undefined,
     accessToken: string
   ): Promise<PublishResult> {
     const blob = await this.fetchAsBlob(imageUrl);
@@ -113,6 +126,7 @@ export class FacebookPublisher implements PlatformPublisher {
     form.set("message", message);
     form.set("access_token", accessToken);
     form.set("source", blob, "image.jpg");
+    if (placeId) form.set("place", placeId);
 
     const response = await fetch(`${this.apiBase}/${pageId}/photos`, {
       method: "POST",
@@ -133,6 +147,7 @@ export class FacebookPublisher implements PlatformPublisher {
     pageId: string,
     message: string,
     imageUrls: string[],
+    placeId: string | undefined,
     accessToken: string
   ): Promise<PublishResult> {
     // 1. Upload each image as an unpublished photo to obtain its media fbid.
@@ -156,6 +171,7 @@ export class FacebookPublisher implements PlatformPublisher {
     const params = new URLSearchParams();
     params.set("message", message);
     params.set("access_token", accessToken);
+    if (placeId) params.set("place", placeId);
     mediaFbids.forEach((fbid, i) => {
       params.append(`attached_media[${i}]`, JSON.stringify({ media_fbid: fbid }));
     });
@@ -173,6 +189,36 @@ export class FacebookPublisher implements PlatformPublisher {
       platformUrl: `https://www.facebook.com/${postId}`,
       publishedAt: new Date(),
     };
+  }
+
+  /**
+   * Posts a comment on the freshly published post. Best-effort: a failure here
+   * must not fail the whole publish, so errors are logged and swallowed.
+   */
+  private async postFirstComment(
+    postId: string,
+    message: string,
+    accessToken: string
+  ): Promise<void> {
+    try {
+      const params = new URLSearchParams();
+      params.set("message", message);
+      params.set("access_token", accessToken);
+
+      const res = await fetch(`${this.apiBase}/${postId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.warn(`Facebook first comment failed ${res.status}: ${body}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Facebook first comment error: ${message}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

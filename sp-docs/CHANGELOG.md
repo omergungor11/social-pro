@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-06-25
+
+### Added
+- Gonderi ekstralari (Facebook & Instagram): konum etiketleme, ilk yorum ve kullanici etiketleme. Yeni paylasilan `PostExtras` bileseni (debounce'lu konum aramasi + dropdown, ilk yorum alani, IG icin chip-tabanli kullanici etiketleme) hem yeni post hem post detay sayfasina eklendi; sadece FB/IG seciliyken gorunur.
+- Konum arama endpoint'i: `GET /social-accounts/:id/location-search?q=` — FB Pages place index'ini proxy'ler, `{id, name, address}` dondurur (yalnizca FB/IG hesaplari).
+- IG publisher: `location_id` (tek gorsel + carousel), `user_tags` (tek gorselde merkeze konumlanir) ve yayindan sonra ilk yorum (best-effort).
+- FB publisher: `place` parametresi (text/tek foto/coklu foto) ve yayindan sonra ilk yorum (best-effort). FB user-tags API kisitli oldugu icin IG'ye ozel tutuldu.
+- `PublishContent` arayuzune `location` / `firstComment` / `userTags` alanlari eklendi; `buildContent` bunlari post iceriginden okuyor.
+
 ## 2026-06-23 (2)
 
 ### Changed

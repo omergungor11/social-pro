@@ -299,7 +299,29 @@ export class PublisherService {
       : undefined;
     const mediaUrls = post.media.map((m) => m.url);
 
-    return { text, link, hashtags, mediaUrls, raw };
+    // Optional posting extras (shared across platforms; applied where supported).
+    const rawLocation = raw["location"] as
+      | { id?: unknown; name?: unknown }
+      | null
+      | undefined;
+    const location =
+      rawLocation && typeof rawLocation.id === "string"
+        ? {
+            id: rawLocation.id,
+            name: typeof rawLocation.name === "string" ? rawLocation.name : undefined,
+          }
+        : null;
+    const firstComment =
+      typeof raw["firstComment"] === "string" && raw["firstComment"].trim()
+        ? (raw["firstComment"] as string)
+        : null;
+    const userTags = Array.isArray(raw["userTags"])
+      ? (raw["userTags"] as unknown[]).filter(
+          (t): t is string => typeof t === "string" && t.length > 0,
+        )
+      : [];
+
+    return { text, link, hashtags, mediaUrls, location, firstComment, userTags, raw };
   }
 
   private decryptAccount(account: SocialAccount): DecryptedAccount {

@@ -18,6 +18,7 @@ import { Dialog, DialogFooter } from '@/components/ui/dialog';
 import { UploadZone, type UploadedFile } from '@/components/media/upload-zone';
 import { PostPreview, PLATFORM_CHAR_LIMITS } from '@/components/posts/post-preview';
 import { PostComments } from '@/components/inbox/post-comments';
+import { PostExtras, EMPTY_POST_EXTRAS, type PostExtrasValue } from '@/components/posts/post-extras';
 import {
   PlatformIcon, getPlatformLabel, PLATFORM_ACCENT, type Platform,
 } from '@/components/social/platform-icon';
@@ -1201,6 +1202,7 @@ export default function PostDetailPage(): React.JSX.Element {
   const [scheduleDate, setScheduleDate] = React.useState('');
   const [scheduleTime, setScheduleTime] = React.useState('09:00');
   const [uploadedFiles, setUploadedFiles] = React.useState<UploadedFile[]>([]);
+  const [extras, setExtras] = React.useState<PostExtrasValue>(EMPTY_POST_EXTRAS);
 
   // Social accounts for target selection
   const [socialAccounts, setSocialAccounts] = React.useState<Array<{ id: string; platform: string; displayName: string | null }>>([]);
@@ -1233,6 +1235,27 @@ export default function PostDetailPage(): React.JSX.Element {
         initContents['_default'] = mapped.content;
       }
       setContents(initContents);
+
+      // Hydrate posting extras (location / first comment / user tags) from the
+      // raw content JSON so the composer reflects what was previously saved.
+      const rawContent = data.content as Record<string, unknown> | null | undefined;
+      if (rawContent && typeof rawContent === 'object') {
+        const loc = rawContent.location as { id?: unknown; name?: unknown } | null | undefined;
+        const tags = Array.isArray(rawContent.userTags)
+          ? (rawContent.userTags as unknown[]).filter((t): t is string => typeof t === 'string')
+          : [];
+        setExtras({
+          location:
+            loc && typeof loc.id === 'string'
+              ? { id: loc.id, name: typeof loc.name === 'string' ? loc.name : loc.id }
+              : null,
+          firstComment:
+            typeof rawContent.firstComment === 'string' ? rawContent.firstComment : '',
+          userTags: tags,
+        });
+      } else {
+        setExtras(EMPTY_POST_EXTRAS);
+      }
 
       if (mapped.scheduledAt) {
         const d = new Date(mapped.scheduledAt);
@@ -1281,6 +1304,18 @@ export default function PostDetailPage(): React.JSX.Element {
   const apiMediaUrls = (post?.media ?? []).map((m) => m.url).filter(Boolean);
   const allMediaUrls = [...apiMediaUrls, ...mediaUrls];
 
+  // Posting extras (location / first comment / user tags) only apply to FB & IG.
+  const activePlatforms = post?.platforms ?? [];
+  const showExtras =
+    activePlatforms.includes('facebook') || activePlatforms.includes('instagram');
+  const showUserTags = activePlatforms.includes('instagram');
+  const locationSearchAccountId = React.useMemo(() => {
+    const acc = socialAccounts.find((a) =>
+      ['facebook', 'instagram'].includes(a.platform),
+    );
+    return acc?.id ?? null;
+  }, [socialAccounts]);
+
   function handleContentChange(platform: Platform, value: string): void {
     setContents((prev) => ({ ...prev, [platform]: value }));
   }
@@ -1308,6 +1343,19 @@ export default function PostDetailPage(): React.JSX.Element {
       const t = contents[p];
       if (typeof t === 'string' && t.length > 0) contentObj[p] = t;
     });
+
+    // Posting extras (Facebook & Instagram) — applied where supported.
+    if (showExtras) {
+      if (extras.location) {
+        contentObj.location = { id: extras.location.id, name: extras.location.name };
+      }
+      if (extras.firstComment.trim()) {
+        contentObj.firstComment = extras.firstComment.trim();
+      }
+      if (showUserTags && extras.userTags.length > 0) {
+        contentObj.userTags = extras.userTags;
+      }
+    }
 
     const payload: Record<string, unknown> = {
       title: title.trim(),
@@ -1848,6 +1896,16 @@ export default function PostDetailPage(): React.JSX.Element {
               onRemove={handleRemoveMedia}
               onUpload={setUploadedFiles}
             />
+
+            {/* Post extras — Facebook & Instagram only, editable posts */}
+            {isEditable && showExtras && (
+              <PostExtras
+                value={extras}
+                onChange={setExtras}
+                searchAccountId={locationSearchAccountId}
+                showUserTags={showUserTags}
+              />
+            )}
           </div>
         </div>
       </div>

@@ -30,6 +30,7 @@ import {
   getPlatformLabel,
   type Platform,
 } from '@/components/social/platform-icon';
+import { PostExtras, EMPTY_POST_EXTRAS, type PostExtrasValue } from '@/components/posts/post-extras';
 import { apiClient, ApiRequestError } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,7 @@ export default function NewPostPage(): React.JSX.Element {
   const [scheduleTime, setScheduleTime] = React.useState('09:00');
   const [timezone, setTimezone] = React.useState('America/New_York');
   const [uploadedFiles, setUploadedFiles] = React.useState<UploadedFile[]>([]);
+  const [extras, setExtras] = React.useState<PostExtrasValue>(EMPTY_POST_EXTRAS);
 
   // ── Preview state ──────────────────────────────────────────────────────────
   const [previewPlatform, setPreviewPlatform] = React.useState<Platform>('twitter');
@@ -364,6 +366,20 @@ export default function NewPostPage(): React.JSX.Element {
   const firstMedia =
     uploadedFiles.find((f) => f.preview !== null)?.preview ?? null;
 
+  // Post extras (location / first comment / user tags) only apply to FB & IG.
+  const showExtras =
+    selectedPlatforms.includes('facebook') || selectedPlatforms.includes('instagram');
+  const showUserTags = selectedPlatforms.includes('instagram');
+  // A connected FB/IG account whose Page token can resolve the location search.
+  const locationSearchAccountId = React.useMemo(() => {
+    const acc = accounts.find(
+      (a) =>
+        selectedAccountIds.has(a.id) &&
+        ['facebook', 'instagram'].includes(a.platform.toLowerCase()),
+    );
+    return acc?.id ?? null;
+  }, [accounts, selectedAccountIds]);
+
   function getContentForPlatform(platform: Platform): string {
     const override = platformContents[platform];
     return override.overridden ? override.text : defaultContent;
@@ -421,6 +437,19 @@ export default function NewPostPage(): React.JSX.Element {
         contentObj[p] = override.text;
       }
     });
+
+    // Posting extras (Facebook & Instagram) — applied where supported.
+    if (showExtras) {
+      if (extras.location) {
+        contentObj['location'] = { id: extras.location.id, name: extras.location.name };
+      }
+      if (extras.firstComment.trim()) {
+        contentObj['firstComment'] = extras.firstComment.trim();
+      }
+      if (showUserTags && extras.userTags.length > 0) {
+        contentObj['userTags'] = extras.userTags;
+      }
+    }
 
     const payload: Record<string, unknown> = {
       title: title.trim() || undefined,
@@ -960,6 +989,16 @@ export default function NewPostPage(): React.JSX.Element {
                 )}
               </CardContent>
             </Card>
+
+            {/* Post extras — Facebook & Instagram only */}
+            {showExtras && (
+              <PostExtras
+                value={extras}
+                onChange={setExtras}
+                searchAccountId={locationSearchAccountId}
+                showUserTags={showUserTags}
+              />
+            )}
 
             {/* Schedule */}
             <Card>

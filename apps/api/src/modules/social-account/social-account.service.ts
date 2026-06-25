@@ -22,6 +22,14 @@ export interface OAuthInitiation {
   state: string;
 }
 
+/** A taggable place/location resolved from the Facebook Pages search API. */
+export interface LocationResult {
+  id: string;
+  name: string;
+  /** Human-readable address line if the place exposes location data. */
+  address?: string;
+}
+
 export interface FacebookPageInfo {
   id: string;
   name: string;
@@ -966,6 +974,100 @@ export class SocialAccountService {
         isTokenExpired: false,
         checkedAt: now,
       };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Location search (for tagging a place on FB / IG posts)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Searches taggable places via the Facebook Pages search API. The returned
+   * page ids are usable as `place` (Facebook) / `location_id` (Instagram) when
+   * publishing. Only meaningful for FACEBOOK / INSTAGRAM accounts, which carry a
+   * Graph API access token.
+   */
+  async searchLocations(
+    agencyId: string,
+    accountId: string,
+    query: string,
+  ): Promise<LocationResult[]> {
+    const q = query?.trim();
+    if (!q) {
+      return [];
+    }
+
+    const account = await this.prisma.socialAccount.findFirst({
+      where: { id: accountId, agencyId },
+    });
+
+    if (!account) {
+      throw new NotFoundException(`Social account '${accountId}' not found`);
+    }
+
+    if (
+      account.platform !== SocialPlatform.FACEBOOK &&
+      account.platform !== SocialPlatform.INSTAGRAM
+    ) {
+      throw new BadRequestException(
+        "Location search is only available for Facebook and Instagram accounts",
+      );
+    }
+
+    let accessToken: string;
+    try {
+      accessToken = this.encryption.decrypt(account.accessToken);
+    } catch {
+      throw new BadRequestException(
+        "Could not decrypt access token — please reconnect this account",
+      );
+    }
+
+    const params = new URLSearchParams({
+      q,
+      type: "place",
+      fields: "id,name,location",
+      limit: "10",
+      access_token: accessToken,
+    });
+
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v22.0/pages/search?${params.toString()}`,
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.warn(`Location search failed ${res.status}: ${body}`);
+        return [];
+      }
+
+      const json = (await res.json()) as {
+        data?: Array<{
+          id: string;
+          name: string;
+          location?: {
+            street?: string;
+            city?: string;
+            country?: string;
+          };
+        }>;
+      };
+
+      return (json.data ?? []).map((place) => {
+        const loc = place.location;
+        const address = loc
+          ? [loc.street, loc.city, loc.country].filter(Boolean).join(", ")
+          : undefined;
+        return {
+          id: place.id,
+          name: place.name,
+          address: address || undefined,
+        };
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Location search error: ${message}`);
+      return [];
     }
   }
 

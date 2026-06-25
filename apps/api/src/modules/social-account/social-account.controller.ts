@@ -30,6 +30,7 @@ import {
   AccountHealthStatus,
   OAuthInitiation,
   SocialAccountPublic,
+  LocationResult,
 } from "./social-account.service";
 import { PlatformAvailability } from "./services/oauth-config.service";
 import { ListAccountsQueryDto } from "./dto/list-accounts-query.dto";
@@ -419,6 +420,30 @@ export class SocialAccountController {
     @Param("id") accountId: string,
   ): Promise<AccountHealthStatus> {
     return this.socialAccountService.checkHealth(accountId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Location search (for tagging a place on FB / IG posts)
+  // ---------------------------------------------------------------------------
+
+  @Get(":id/location-search")
+  @ApiOperation({
+    summary: "Search taggable places",
+    description:
+      "Searches the Facebook Pages place index. The returned ids can be used as " +
+      "a location/place tag when publishing to Facebook or Instagram. " +
+      "Only available for FACEBOOK and INSTAGRAM accounts.",
+  })
+  @ApiParam({ name: "id", description: "Social account ID" })
+  @ApiQuery({ name: "q", description: "Place search query", required: true })
+  @ApiResponse({ status: 200, description: "Places retrieved" })
+  @ApiResponse({ status: 404, description: "Social account not found" })
+  async searchLocations(
+    @CurrentAgency() agencyId: string,
+    @Param("id") accountId: string,
+    @Query("q") q: string,
+  ): Promise<LocationResult[]> {
+    return this.socialAccountService.searchLocations(agencyId, accountId, q ?? "");
   }
 
   // ---------------------------------------------------------------------------
