@@ -9,7 +9,7 @@ import { PlatformIcon } from '@/components/social/platform-icon';
 // Shared Post types (kept here to avoid circular imports with the page)
 // ---------------------------------------------------------------------------
 
-export type PostStatus = 'draft' | 'scheduled' | 'publishing' | 'published' | 'failed' | 'cancelled';
+export type PostStatus = 'draft' | 'pending_approval' | 'scheduled' | 'publishing' | 'published' | 'failed' | 'cancelled';
 
 export interface PostMetrics {
   likes: number;
@@ -48,6 +48,7 @@ export interface CalendarViewProps {
 
 const STATUS_DOT: Record<PostStatus, string> = {
   draft: 'bg-slate-400',
+  pending_approval: 'bg-amber-500',
   scheduled: 'bg-blue-500',
   publishing: 'bg-violet-500',
   published: 'bg-emerald-500',
@@ -57,6 +58,7 @@ const STATUS_DOT: Record<PostStatus, string> = {
 
 const STATUS_BAR: Record<PostStatus, string> = {
   draft: 'bg-slate-400',
+  pending_approval: 'bg-amber-500',
   scheduled: 'bg-blue-500',
   publishing: 'bg-violet-500',
   published: 'bg-emerald-500',
@@ -66,6 +68,7 @@ const STATUS_BAR: Record<PostStatus, string> = {
 
 const STATUS_CHIP: Record<PostStatus, string> = {
   draft: 'bg-slate-50 hover:bg-slate-100 text-slate-700',
+  pending_approval: 'bg-amber-50 hover:bg-amber-100 text-amber-800',
   scheduled: 'bg-blue-50 hover:bg-blue-100 text-blue-800',
   publishing: 'bg-violet-50 hover:bg-violet-100 text-violet-800',
   published: 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800',
@@ -75,6 +78,7 @@ const STATUS_CHIP: Record<PostStatus, string> = {
 
 const STATUS_LABEL: Record<PostStatus, string> = {
   draft: 'Draft',
+  pending_approval: 'Pending Approval',
   scheduled: 'Scheduled',
   publishing: 'Publishing',
   published: 'Published',
@@ -84,6 +88,7 @@ const STATUS_LABEL: Record<PostStatus, string> = {
 
 const STATUS_PILL: Record<PostStatus, string> = {
   draft: 'bg-slate-100 text-slate-600',
+  pending_approval: 'bg-amber-100 text-amber-700',
   scheduled: 'bg-blue-100 text-blue-700',
   publishing: 'bg-violet-100 text-violet-700',
   published: 'bg-emerald-100 text-emerald-700',

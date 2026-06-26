@@ -27,6 +27,7 @@ enum SocialPlatform {
 
 enum PostStatus {
   DRAFT
+  PENDING_APPROVAL
   SCHEDULED
   PUBLISHING
   PUBLISHED
@@ -109,6 +110,8 @@ enum NotificationType {
   ACCOUNT_DISCONNECT
   LIMIT_WARNING
   REPORT_READY
+  APPROVAL_REQUESTED
+  APPROVAL_DECISION
 }
 
 enum NotificationChannel {
@@ -160,6 +163,7 @@ model Agency {
   notificationPrefs     NotificationPreference[]
   auditLogs             AuditLog[]
   inboxItems            InboxItem[]
+  postingSlots          PostingSlot[]
 }
 
 model User {
@@ -295,6 +299,7 @@ model SocialAccount {
   postTargets       PostTarget[]
   analyticsSnapshots AnalyticsSnapshot[]
   inboxItems        InboxItem[]
+  postingSlots      PostingSlot[]
 
   @@unique([agencyId, platform, platformUserId])
   @@index([agencyId])
@@ -433,11 +438,32 @@ model PostApproval {
   approvedBy  String?
   status      ApprovalStatus @default(PENDING)
   comment     String?
+  approvedAt  DateTime?
   createdAt   DateTime       @default(now())
 
   post        Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId])
+}
+
+// Predefined recurring posting times ("queue slots") used by bulk scheduling
+// to auto-distribute posts. Each slot is a weekly recurring (dayOfWeek + time)
+// window, optionally scoped to a single social account.
+model PostingSlot {
+  id              String   @id @default(cuid())
+  agencyId        String
+  socialAccountId String?
+  dayOfWeek       Int      // 0 = Sunday … 6 = Saturday
+  hour            Int      // 0–23 (interpreted in the agency timezone)
+  minute          Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agency          Agency         @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, isActive])
 }
 
 // === AI ===

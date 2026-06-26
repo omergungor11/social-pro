@@ -5,6 +5,8 @@ import {
   SocialPlatform as SharedSocialPlatform,
 } from "@social-pro/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { PlatformRateLimitService } from "../../common/rate-limit/platform-rate-limit.service";
+import { withRetry, isTransientError } from "../../common/utils/retry";
 import { EncryptionService } from "../../social-account/services/encryption.service";
 import {
   DecryptedAccount,
@@ -56,6 +58,7 @@ export class PublisherService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly rateLimiter: PlatformRateLimitService,
     private readonly twitterPublisher: TwitterPublisher,
     private readonly facebookPublisher: FacebookPublisher,
     private readonly instagramPublisher: InstagramPublisher,
@@ -241,7 +244,27 @@ export class PublisherService {
     };
 
     try {
-      const result = await adapter.publish(mergedContent, decrypted);
+      // Respect per-agency platform rate limits before spending an API call.
+      await this.rateLimiter.assertPlatformLimit(
+        socialAccount.platform,
+        socialAccount.agencyId
+      );
+
+      // Retry transient failures (429 / 5xx / network) with exponential backoff.
+      const result = await withRetry(
+        () => adapter.publish(mergedContent, decrypted),
+        {
+          isRetryable: isTransientError,
+          onRetry: (retryErr, attempt, delayMs) => {
+            const msg =
+              retryErr instanceof Error ? retryErr.message : String(retryErr);
+            this.logger.warn(
+              `Retry ${attempt} for target=${target.id} ` +
+                `platform=${socialAccount.platform} in ${Math.round(delayMs)}ms: ${msg}`
+            );
+          },
+        }
+      );
 
       await this.prisma.postTarget.update({
         where: { id: target.id },

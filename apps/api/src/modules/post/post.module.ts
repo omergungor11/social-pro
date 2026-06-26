@@ -1,11 +1,16 @@
 import { Module } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { PrismaModule } from "../common/prisma/prisma.module";
+import { RateLimitModule } from "../common/rate-limit/rate-limit.module";
 import { MediaModule } from "../media/media.module";
+import { NotificationModule } from "../notification/notification.module";
 import { SocialAccountModule } from "../social-account/social-account.module";
 import { EncryptionService } from "../social-account/services/encryption.service";
 import { PostController } from "./post.controller";
+import { QueueController } from "./queue.controller";
 import { PostService } from "./post.service";
+import { PostApprovalService } from "./post-approval.service";
+import { QueueSlotService } from "./queue-slot.service";
 import { PostSchedulerService, POST_PUBLISH_QUEUE } from "./jobs/post-scheduler.service";
 import { PostPublishProcessor } from "./jobs/post-publish.processor";
 import { PublisherService } from "./publisher/publisher.service";
@@ -34,7 +39,9 @@ import { TikTokPublisher } from "./publisher/adapters/tiktok.publisher";
 @Module({
   imports: [
     PrismaModule,
+    RateLimitModule,
     MediaModule,
+    NotificationModule,
     SocialAccountModule,
     BullModule.forRoot({
       connection: {
@@ -46,10 +53,12 @@ import { TikTokPublisher } from "./publisher/adapters/tiktok.publisher";
     }),
     BullModule.registerQueue({ name: POST_PUBLISH_QUEUE }),
   ],
-  controllers: [PostController],
+  controllers: [PostController, QueueController],
   providers: [
     // Core services
     PostService,
+    PostApprovalService,
+    QueueSlotService,
     PostSchedulerService,
 
     // BullMQ processor

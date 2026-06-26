@@ -20,21 +20,28 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { PostDeleteResult } from "@social-pro/shared-types";
+import { UserRole } from "@social-pro/shared-types";
 import { CurrentAgency } from "../common/decorators/current-agency.decorator";
 import { CurrentUser, AuthenticatedUser } from "../common/decorators/current-user.decorator";
+import { Roles } from "../common/decorators/roles.decorator";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { PostService } from "./post.service";
+import { PostApprovalService } from "./post-approval.service";
 import { CreatePostDto, PostMediaInputDto } from "./dto/create-post.dto";
 import { UpdatePostDto } from "./dto/update-post.dto";
 import { PostListQueryDto } from "./dto/post-list-query.dto";
 import { SchedulePostDto } from "./dto/schedule-post.dto";
+import { ApprovalDecisionDto } from "./dto/approval-decision.dto";
 
 @ApiTags("Posts")
 @ApiBearerAuth()
 @Controller("posts")
 @UseGuards(RolesGuard)
 export class PostController {
-  constructor(private readonly postService: PostService) {}
+  constructor(
+    private readonly postService: PostService,
+    private readonly approvalService: PostApprovalService
+  ) {}
 
   // ---------------------------------------------------------------------------
   // List
@@ -259,6 +266,88 @@ export class PostController {
     @Param("id") postId: string
   ) {
     return this.postService.cancel(agencyId, postId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Approval workflow
+  // ---------------------------------------------------------------------------
+
+  @Post(":id/request-approval")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Submit a post for approval",
+    description:
+      "Moves a DRAFT post to PENDING_APPROVAL and notifies Owners/Admins. " +
+      "While pending, the post cannot be scheduled or published.",
+  })
+  @ApiParam({ name: "id", description: "Post ID" })
+  @ApiResponse({ status: 200, description: "Approval requested" })
+  @ApiResponse({ status: 400, description: "Post is not in DRAFT status" })
+  @ApiResponse({ status: 404, description: "Post not found" })
+  async requestApproval(
+    @CurrentAgency() agencyId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") postId: string
+  ) {
+    return this.approvalService.requestApproval(agencyId, postId, user.id);
+  }
+
+  @Post(":id/approvals/:approvalId/approve")
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Approve a pending post",
+    description: "Owner/Admin approves the request; the post returns to DRAFT, ready to schedule.",
+  })
+  @ApiParam({ name: "id", description: "Post ID" })
+  @ApiParam({ name: "approvalId", description: "PostApproval ID" })
+  @ApiResponse({ status: 200, description: "Post approved" })
+  @ApiResponse({ status: 400, description: "Post is not awaiting approval" })
+  @ApiResponse({ status: 403, description: "Insufficient permissions" })
+  @ApiResponse({ status: 404, description: "Post or approval not found" })
+  async approve(
+    @CurrentAgency() agencyId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") postId: string,
+    @Param("approvalId") approvalId: string,
+    @Body() dto: ApprovalDecisionDto
+  ) {
+    return this.approvalService.approve(
+      agencyId,
+      postId,
+      approvalId,
+      user.id,
+      dto.comment
+    );
+  }
+
+  @Post(":id/approvals/:approvalId/reject")
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Reject a pending post",
+    description: "Owner/Admin rejects the request (comment required); the post returns to DRAFT.",
+  })
+  @ApiParam({ name: "id", description: "Post ID" })
+  @ApiParam({ name: "approvalId", description: "PostApproval ID" })
+  @ApiResponse({ status: 200, description: "Post rejected" })
+  @ApiResponse({ status: 400, description: "Post not awaiting approval or missing comment" })
+  @ApiResponse({ status: 403, description: "Insufficient permissions" })
+  @ApiResponse({ status: 404, description: "Post or approval not found" })
+  async reject(
+    @CurrentAgency() agencyId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") postId: string,
+    @Param("approvalId") approvalId: string,
+    @Body() dto: ApprovalDecisionDto
+  ) {
+    return this.approvalService.reject(
+      agencyId,
+      postId,
+      approvalId,
+      user.id,
+      dto.comment ?? ""
+    );
   }
 
   // ---------------------------------------------------------------------------

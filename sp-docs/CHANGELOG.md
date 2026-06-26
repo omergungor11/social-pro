@@ -3,6 +3,9 @@
 ## 2026-06-26
 
 ### Added
+- Onay is akisi (post approval): DRAFT post `request-approval` ile `PENDING_APPROVAL`'a gecer; OWNER/ADMIN `approve`/`reject` (reject'te yorum zorunlu) ile DRAFT'a dondurur. Yeni `PostApprovalService` + 3 endpoint (`POST /posts/:id/request-approval`, `.../approvals/:approvalId/approve|reject`), in-app bildirimler (`APPROVAL_REQUESTED` / `APPROVAL_DECISION`), `PostApproval.approvedAt` kolonu, `PENDING_APPROVAL` PostStatus. Frontend: post detayinda Submit-for-Approval / Approve / Reject aksiyonlari, bekleme banneri ve son red notu.
+- Yayin kuyrugu (queue slots): haftalik tekrar eden gonderim zamanlari (`PostingSlot` modeli + migration) ve bunlara DRAFT post dagitan toplu zamanlama. Yeni `QueueSlotService` + `QueueController` (`GET/POST/DELETE /posting-slots`, `POST /posts/bulk-schedule`). Frontend: posts sayfasinda "Queue" yoneticisi (gun/saat slot ekle-sil, opsiyonel hesap kapsami) ve secili draftlar icin "Add to queue" toplu aksiyonu. `PENDING_APPROVAL` durumu liste/takvim/filtrelerde ilk sinif.
+- Dayanikli yayinlama: platform API cagrilarinda per-agency rate limit kontrolu + gecici hatalarda (429/5xx/network) ustel backoff'lu otomatik retry (yeni `common/utils/retry.ts`, `PublisherService`'e baglandi).
 - Profil & ajans ayarlari guncelleme: `PATCH /auth/me` (ad, avatar — bos string ile temizlenir) ve `PATCH /auth/agency` (ad, slug, varsayilan timezone; OWNER/ADMIN, slug cakismasinda 409). Timezone schema degisikligi olmadan ajans `settings` JSON'inda saklaniyor; `getMe` artik `agency.timezone` donduruyor. Yeni `UpdateProfileDto` / `UpdateAgencyDto`.
 
 ### Changed

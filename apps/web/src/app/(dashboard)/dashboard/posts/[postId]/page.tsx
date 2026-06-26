@@ -7,7 +7,7 @@ import {
   ChevronLeft, Clock, Send, Trash2, RefreshCw, Share2,
   CheckCircle2, XCircle, Loader2, AlertCircle, Eye,
   Heart, MessageCircle, BarChart3, Copy, Calendar,
-  User, Building2, ImageIcon, History, X,
+  User, Building2, ImageIcon, History, X, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,16 @@ import { apiClient, ApiRequestError } from '@/lib/api-client';
 // Types
 // ---------------------------------------------------------------------------
 
-type PostStatus = 'draft' | 'scheduled' | 'published' | 'failed' | 'cancelled';
+type PostStatus = 'draft' | 'pending_approval' | 'scheduled' | 'published' | 'failed' | 'cancelled';
+
+interface PostApprovalItem {
+  id: string;
+  status: 'pending' | 'approved' | 'rejected';
+  comment: string | null;
+  requestedBy: string;
+  approvedBy: string | null;
+  createdAt: string;
+}
 type TargetStatus = 'pending' | 'published' | 'failed' | 'scheduled';
 
 interface MediaItem {
@@ -67,6 +76,7 @@ interface PostDetail {
   clientName: string;
   createdAt: string;
   media: MediaItem[];
+  approvals: PostApprovalItem[];
 }
 
 interface ActivityEntry {
@@ -128,6 +138,16 @@ function mapApiPost(a: Record<string, unknown>): PostDetail {
 
   const client = a.client as Record<string, unknown> | null | undefined;
 
+  const rawApprovals = (a.approvals ?? []) as Record<string, unknown>[];
+  const approvals: PostApprovalItem[] = rawApprovals.map((ap) => ({
+    id: (ap.id ?? '') as string,
+    status: ((ap.status ?? 'PENDING') as string).toLowerCase() as PostApprovalItem['status'],
+    comment: (ap.comment ?? null) as string | null,
+    requestedBy: (ap.requestedBy ?? '') as string,
+    approvedBy: (ap.approvedBy ?? null) as string | null,
+    createdAt: (ap.createdAt ?? '') as string,
+  }));
+
   return {
     id: (a.id ?? '') as string,
     title: ((a.title as string | undefined) || 'Untitled Post'),
@@ -140,6 +160,7 @@ function mapApiPost(a: Record<string, unknown>): PostDetail {
     clientId: (a.clientId ?? '') as string,
     clientName: (client?.name ?? '') as string,
     createdAt: (a.createdAt ?? '') as string,
+    approvals,
     media: rawMedia.map((m) => ({
       id: (m.id ?? '') as string,
       url: ((m.url ?? m.storageKey ?? '') as string),
@@ -254,6 +275,7 @@ function getCountdown(iso: string | null): string {
 function StatusBadge({ status }: { status: PostStatus }): React.JSX.Element {
   const config: Record<PostStatus, { variant: 'gray' | 'blue' | 'green' | 'red' | 'default'; label: string }> = {
     draft: { variant: 'gray', label: 'Draft' },
+    pending_approval: { variant: 'default', label: 'Pending Approval' },
     scheduled: { variant: 'blue', label: 'Scheduled' },
     published: { variant: 'green', label: 'Published' },
     failed: { variant: 'red', label: 'Failed' },
@@ -1195,6 +1217,9 @@ export default function PostDetailPage(): React.JSX.Element {
   const [notFound, setNotFound] = React.useState(false);
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [actionLoading, setActionLoading] = React.useState(false);
+  const [currentUserRole, setCurrentUserRole] = React.useState<string | null>(null);
+  const [rejectOpen, setRejectOpen] = React.useState(false);
+  const [rejectComment, setRejectComment] = React.useState('');
 
   // Edit state
   const [title, setTitle] = React.useState('');
@@ -1283,6 +1308,10 @@ export default function PostDetailPage(): React.JSX.Element {
     apiClient.get<Array<{ id: string; platform: string; displayName: string | null; platformUsername: string | null }>>('/social-accounts')
       .then((accounts) => setSocialAccounts(accounts.map((a) => ({ id: a.id, platform: (a.platform ?? '').toLowerCase(), displayName: a.displayName ?? a.platformUsername ?? 'Unknown' }))))
       .catch(() => { /* non-fatal */ });
+    // Current user role — gates approve/reject actions to Owners/Admins.
+    apiClient.get<{ role: string }>('/auth/me')
+      .then((me) => setCurrentUserRole(me.role))
+      .catch(() => { /* non-fatal */ });
   }, [fetchPost]);
 
   function showToast(message: string, type: 'success' | 'error'): void {
@@ -1296,6 +1325,20 @@ export default function PostDetailPage(): React.JSX.Element {
   const isFailed = status === 'failed';
   const isCancelled = status === 'cancelled';
   const isScheduled = status === 'scheduled';
+  const isPendingApproval = status === 'pending_approval';
+
+  // Latest still-pending approval request (used by approve/reject actions).
+  const pendingApproval = React.useMemo(
+    () => (post?.approvals ?? []).find((a) => a.status === 'pending') ?? null,
+    [post?.approvals],
+  );
+  const canApprove =
+    currentUserRole === 'OWNER' || currentUserRole === 'ADMIN';
+  // Most recent rejection note to surface back to the author on the draft.
+  const lastRejection = React.useMemo(
+    () => (post?.approvals ?? []).find((a) => a.status === 'rejected') ?? null,
+    [post?.approvals],
+  );
 
   const mediaUrls = uploadedFiles
     .filter((f) => f.preview !== null)
@@ -1471,6 +1514,67 @@ export default function PostDetailPage(): React.JSX.Element {
     }
   }
 
+  // ── Approval workflow ──────────────────────────────────────────────────────
+  async function handleRequestApproval(): Promise<void> {
+    if (!post) return;
+    setActionLoading(true);
+    try {
+      // Persist any pending edits first so reviewers see the latest content.
+      if (isEditable) {
+        await apiClient.patch(`/posts/${post.id}`, buildPatchPayload());
+      }
+      await apiClient.post(`/posts/${post.id}/request-approval`);
+      showToast('Sent for approval', 'success');
+      void fetchPost();
+    } catch (err) {
+      console.error('Failed to request approval:', err);
+      showToast('Failed to send for approval. Please try again.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleApprove(): Promise<void> {
+    if (!post || !pendingApproval) return;
+    setActionLoading(true);
+    try {
+      await apiClient.post(
+        `/posts/${post.id}/approvals/${pendingApproval.id}/approve`,
+      );
+      showToast('Post approved', 'success');
+      void fetchPost();
+    } catch (err) {
+      console.error('Failed to approve post:', err);
+      showToast('Failed to approve. Please try again.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleReject(): Promise<void> {
+    if (!post || !pendingApproval) return;
+    if (rejectComment.trim().length === 0) {
+      showToast('Please add a reason for rejection.', 'error');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await apiClient.post(
+        `/posts/${post.id}/approvals/${pendingApproval.id}/reject`,
+        { comment: rejectComment.trim() },
+      );
+      showToast('Post rejected', 'success');
+      setRejectOpen(false);
+      setRejectComment('');
+      void fetchPost();
+    } catch (err) {
+      console.error('Failed to reject post:', err);
+      showToast('Failed to reject. Please try again.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   // ── Retry (failed) ─────────────────────────────────────────────────────────
   async function handleRetry(): Promise<void> {
     await handlePublishNow();
@@ -1620,6 +1724,16 @@ export default function PostDetailPage(): React.JSX.Element {
                   variant="outline"
                   size="sm"
                   disabled={actionLoading}
+                  onClick={() => void handleRequestApproval()}
+                  className="gap-1.5 text-amber-700 border-amber-200 hover:bg-amber-50"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Submit for Approval
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={actionLoading}
                   onClick={() => setScheduleOpen(true)}
                   className="gap-1.5"
                 >
@@ -1640,6 +1754,41 @@ export default function PostDetailPage(): React.JSX.Element {
                   Publish Now
                 </Button>
               </>
+            )}
+
+            {/* Pending-approval actions */}
+            {isPendingApproval && canApprove && pendingApproval && (
+              <>
+                <Button
+                  size="sm"
+                  disabled={actionLoading}
+                  onClick={() => void handleApprove()}
+                  className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {actionLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  )}
+                  Approve
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={actionLoading}
+                  onClick={() => setRejectOpen(true)}
+                  className="gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Reject
+                </Button>
+              </>
+            )}
+            {isPendingApproval && !canApprove && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium">
+                <Clock className="h-3.5 w-3.5" />
+                Awaiting review
+              </span>
             )}
 
             {/* Scheduled actions */}
@@ -1773,6 +1922,29 @@ export default function PostDetailPage(): React.JSX.Element {
             <p className="text-sm text-amber-800">
               This post was cancelled. You can restore it to draft to make changes and republish.
             </p>
+          </div>
+        )}
+
+        {/* ── Pending approval banner ────────────────────────────────────────── */}
+        {isPendingApproval && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3">
+            <ShieldCheck className="h-5 w-5 text-amber-500 shrink-0" />
+            <p className="text-sm text-amber-800">
+              {canApprove
+                ? 'This post is awaiting your review. Approve it to make it ready to schedule, or reject with feedback.'
+                : 'This post has been submitted for approval. An Owner or Admin needs to review it before it can be scheduled.'}
+            </p>
+          </div>
+        )}
+
+        {/* ── Last rejection note (on draft) ─────────────────────────────────── */}
+        {status === 'draft' && lastRejection?.comment && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
+            <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-red-800">Changes requested</p>
+              <p className="text-sm text-red-700 mt-0.5">{lastRejection.comment}</p>
+            </div>
           </div>
         )}
 
@@ -1929,6 +2101,38 @@ export default function PostDetailPage(): React.JSX.Element {
               <><Loader2 className="h-4 w-4 animate-spin" /> Deleting…</>
             ) : (
               <><Trash2 className="h-4 w-4" /> Delete Post</>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* ── Reject dialog ──────────────────────────────────────────────────── */}
+      <Dialog
+        open={rejectOpen}
+        onClose={() => setRejectOpen(false)}
+        title="Reject Post"
+        description="Let the author know what needs to change. The post returns to draft."
+      >
+        <textarea
+          value={rejectComment}
+          onChange={(e) => setRejectComment(e.target.value)}
+          rows={4}
+          placeholder="Reason for rejection…"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          autoFocus
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setRejectOpen(false)}>Cancel</Button>
+          <Button
+            variant="destructive"
+            disabled={actionLoading || rejectComment.trim().length === 0}
+            onClick={() => void handleReject()}
+            className="gap-1.5"
+          >
+            {actionLoading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Rejecting…</>
+            ) : (
+              <><XCircle className="h-4 w-4" /> Reject Post</>
             )}
           </Button>
         </DialogFooter>

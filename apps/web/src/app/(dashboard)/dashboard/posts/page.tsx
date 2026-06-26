@@ -22,6 +22,7 @@ import {
   ArrowUpDown,
   XCircle,
   ImageIcon,
+  CalendarClock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ import {
   type Platform,
 } from '@/components/social/platform-icon';
 import { CalendarView, type Post, type PostStatus } from '@/components/posts/calendar-view';
+import { QueueManager } from '@/components/posts/queue-manager';
 import { apiClient } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
@@ -261,6 +263,7 @@ function Toast({
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
   { value: 'DRAFT', label: 'Draft' },
+  { value: 'PENDING_APPROVAL', label: 'Pending Approval' },
   { value: 'SCHEDULED', label: 'Scheduled' },
   { value: 'PUBLISHED', label: 'Published' },
   { value: 'FAILED', label: 'Failed' },
@@ -286,6 +289,7 @@ const STATUS_BADGE: Record<PostStatus, {
   label: string;
 }> = {
   draft: { variant: 'gray', label: 'Draft' },
+  pending_approval: { variant: 'default', label: 'Pending Approval' },
   scheduled: { variant: 'blue', label: 'Scheduled' },
   publishing: { variant: 'purple', label: 'Publishing' },
   published: { variant: 'green', label: 'Published' },
@@ -511,6 +515,7 @@ export default function PostsPage(): React.JSX.Element {
   const [duplicatingId, setDuplicatingId] = React.useState<string | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
   const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [queueOpen, setQueueOpen] = React.useState(false);
 
   // ── Fetch posts ────────────────────────────────────────────────────────────
   const fetchPosts = React.useCallback(async () => {
@@ -688,6 +693,55 @@ export default function PostsPage(): React.JSX.Element {
     });
   }
 
+  // ── Bulk: add to queue (distribute drafts onto next free slots) ─────────────
+  async function handleBulkSchedule(): Promise<void> {
+    const ids = sorted
+      .filter((p) => selectedIds.has(p.id) && p.status === 'draft')
+      .map((p) => p.id);
+    if (ids.length === 0) {
+      setToast({ message: 'Select one or more draft posts to queue.', type: 'error' });
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const results = await apiClient.post<
+        Array<{ postId: string; scheduledAt: string | null; success: boolean; error?: string }>
+      >('/posts/bulk-schedule', { postIds: ids });
+      const ok = results.filter((r) => r.success);
+      const scheduledById = new Map(ok.map((r) => [r.postId, r.scheduledAt]));
+      setPosts((prev) =>
+        prev.map((p) =>
+          scheduledById.has(p.id)
+            ? { ...p, status: 'scheduled' as PostStatus, scheduledAt: scheduledById.get(p.id) ?? p.scheduledAt }
+            : p,
+        ),
+      );
+      setSelectedIds(new Set());
+      const failed = results.length - ok.length;
+      setToast({
+        message:
+          failed > 0
+            ? `${ok.length} queued, ${failed} could not be scheduled.`
+            : `${ok.length} post${ok.length !== 1 ? 's' : ''} added to the queue.`,
+        type: failed > 0 ? 'error' : 'success',
+      });
+    } catch (err) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Failed to add to queue.';
+      // Most common cause: no active posting slots configured yet.
+      setToast({
+        message: msg.toLowerCase().includes('slot')
+          ? 'No queue slots configured yet. Open “Queue” to add some.'
+          : 'Failed to add posts to the queue. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // ── Delete ─────────────────────────────────────────────────────────────────
   async function handleDelete(id: string): Promise<void> {
     setDeleting(true);
@@ -760,12 +814,23 @@ export default function PostsPage(): React.JSX.Element {
                 : `${totalCount} post${totalCount !== 1 ? 's' : ''}`}
             </p>
           </div>
-          <Link href="/dashboard/posts/new">
-            <Button size="sm" className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              Create Post
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setQueueOpen(true)}
+            >
+              <CalendarClock className="h-4 w-4" />
+              Queue
             </Button>
-          </Link>
+            <Link href="/dashboard/posts/new">
+              <Button size="sm" className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                Create Post
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Error state */}
@@ -884,6 +949,20 @@ export default function PostsPage(): React.JSX.Element {
               {selectedIds.size} selected
             </span>
             <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 bg-white text-blue-700 hover:bg-blue-50"
+                disabled={bulkBusy}
+                onClick={() => void handleBulkSchedule()}
+              >
+                {bulkBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CalendarClock className="h-3.5 w-3.5" />
+                )}
+                Add to queue
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1185,6 +1264,9 @@ export default function PostsPage(): React.JSX.Element {
           </Button>
         </DialogFooter>
       </Dialog>
+
+      {/* Posting queue manager */}
+      <QueueManager open={queueOpen} onClose={() => setQueueOpen(false)} />
     </>
   );
 }
