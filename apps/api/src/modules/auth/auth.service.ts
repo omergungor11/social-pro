@@ -6,9 +6,22 @@ import {
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
 import { UserRole } from "@social-pro/shared-types";
+import { Prisma } from "@social-pro/prisma";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
+import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { UpdateAgencyDto } from "./dto/update-agency.dto";
+
+const DEFAULT_TIMEZONE = "UTC";
+
+function readTimezone(settings: Prisma.JsonValue | null | undefined): string {
+  if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+    const tz = (settings as Record<string, unknown>)["timezone"];
+    if (typeof tz === "string" && tz.length > 0) return tz;
+  }
+  return DEFAULT_TIMEZONE;
+}
 
 export interface TokenPair {
   accessToken: string;
@@ -204,7 +217,13 @@ export class AuthService {
     name: string;
     avatarUrl: string | null;
     createdAt: Date;
-    agency: { id: string; name: string; slug: string; logoUrl: string | null };
+    agency: {
+      id: string;
+      name: string;
+      slug: string;
+      logoUrl: string | null;
+      timezone: string;
+    };
     role: string;
   }> {
     const user = await this.prisma.user.findUniqueOrThrow({
@@ -225,6 +244,7 @@ export class AuthService {
                 name: true,
                 slug: true,
                 logoUrl: true,
+                settings: true,
               },
             },
           },
@@ -238,14 +258,98 @@ export class AuthService {
       throw new UnauthorizedException("Agency membership not found");
     }
 
+    const { settings, ...agency } = membership.agency;
+
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
-      agency: membership.agency,
+      agency: { ...agency, timezone: readTimezone(settings) },
       role: membership.role,
+    };
+  }
+
+  /**
+   * Updates the current user's profile (display name, avatar).
+   * Pass avatarUrl as an empty string to clear it.
+   */
+  async updateProfile(
+    userId: string,
+    dto: UpdateProfileDto
+  ): Promise<{
+    id: string;
+    email: string;
+    name: string;
+    avatarUrl: string | null;
+  }> {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.avatarUrl !== undefined
+          ? { avatarUrl: dto.avatarUrl === "" ? null : dto.avatarUrl }
+          : {}),
+      },
+      select: { id: true, email: true, name: true, avatarUrl: true },
+    });
+  }
+
+  /**
+   * Updates agency settings (name, slug, default timezone).
+   * Timezone is stored inside the agency `settings` JSON to avoid a schema change.
+   */
+  async updateAgency(
+    agencyId: string,
+    dto: UpdateAgencyDto
+  ): Promise<{
+    id: string;
+    name: string;
+    slug: string;
+    logoUrl: string | null;
+    timezone: string;
+  }> {
+    const agency = await this.prisma.agency.findUniqueOrThrow({
+      where: { id: agencyId },
+    });
+
+    // Guard against slug collisions with another agency
+    if (dto.slug !== undefined && dto.slug !== agency.slug) {
+      const taken = await this.prisma.agency.findUnique({
+        where: { slug: dto.slug },
+      });
+      if (taken && taken.id !== agencyId) {
+        throw new ConflictException("That slug is already in use");
+      }
+    }
+
+    const currentSettings =
+      agency.settings && typeof agency.settings === "object" && !Array.isArray(agency.settings)
+        ? (agency.settings as Record<string, unknown>)
+        : {};
+
+    const nextSettings: Record<string, unknown> =
+      dto.timezone !== undefined
+        ? { ...currentSettings, timezone: dto.timezone }
+        : currentSettings;
+
+    const updated = await this.prisma.agency.update({
+      where: { id: agencyId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.slug !== undefined ? { slug: dto.slug } : {}),
+        settings: nextSettings as Prisma.InputJsonValue,
+      },
+      select: { id: true, name: true, slug: true, logoUrl: true, settings: true },
+    });
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      logoUrl: updated.logoUrl,
+      timezone: readTimezone(updated.settings),
     };
   }
 

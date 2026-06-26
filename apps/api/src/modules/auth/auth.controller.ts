@@ -4,8 +4,10 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Request,
+  UseGuards,
 } from "@nestjs/common";
 import {
   ApiBearerAuth,
@@ -14,11 +16,16 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { Request as ExpressRequest } from "express";
+import { UserRole } from "@social-pro/shared-types";
 import { AuthenticatedUser } from "../common/decorators/current-user.decorator";
+import { Roles } from "../common/decorators/roles.decorator";
+import { RolesGuard } from "../common/guards/roles.guard";
 import { AuthService, AuthResponse, TokenPair } from "./auth.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
+import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { UpdateAgencyDto } from "./dto/update-agency.dto";
 import { Public } from "./decorators/public.decorator";
 
 interface RequestWithUser extends ExpressRequest {
@@ -79,5 +86,32 @@ export class AuthController {
   > {
     const { id, agencyId } = req.user;
     return this.authService.getMe(id, agencyId);
+  }
+
+  @Patch("me")
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Update the current user's profile" })
+  @ApiResponse({ status: 200, description: "Profile updated" })
+  @ApiResponse({ status: 401, description: "Unauthenticated" })
+  async updateProfile(
+    @Request() req: RequestWithUser,
+    @Body() dto: UpdateProfileDto
+  ): Promise<Awaited<ReturnType<AuthService["updateProfile"]>>> {
+    return this.authService.updateProfile(req.user.id, dto);
+  }
+
+  @Patch("agency")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Update agency settings (name, slug, timezone)" })
+  @ApiResponse({ status: 200, description: "Agency updated" })
+  @ApiResponse({ status: 403, description: "Insufficient permissions" })
+  @ApiResponse({ status: 409, description: "Slug already in use" })
+  async updateAgency(
+    @Request() req: RequestWithUser,
+    @Body() dto: UpdateAgencyDto
+  ): Promise<Awaited<ReturnType<AuthService["updateAgency"]>>> {
+    return this.authService.updateAgency(req.user.agencyId, dto);
   }
 }
