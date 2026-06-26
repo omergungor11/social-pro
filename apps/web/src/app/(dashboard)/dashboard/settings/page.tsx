@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Building2, User, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building2, User, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { apiClient, ApiRequestError } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,6 +39,7 @@ type SaveStatus = "idle" | "saving" | "success" | "error";
 // ---------------------------------------------------------------------------
 
 const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "UTC", label: "(UTC+0) Coordinated Universal Time" },
   { value: "America/New_York", label: "(UTC-5) Eastern Time — New York" },
   { value: "America/Chicago", label: "(UTC-6) Central Time — Chicago" },
   { value: "America/Denver", label: "(UTC-7) Mountain Time — Denver" },
@@ -61,18 +63,21 @@ const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
   { value: "Pacific/Auckland", label: "(UTC+13) New Zealand Time — Auckland" },
 ];
 
-// Mock initial data — will be replaced with API calls
-const INITIAL_AGENCY: AgencyFormState = {
-  name: "Acme Media Group",
-  slug: "acme-media-group",
-  timezone: "America/New_York",
-};
-
-const INITIAL_PROFILE: ProfileFormState = {
-  displayName: "Jane Doe",
-  email: "jane@acmemedia.com",
-  avatarUrl: "",
-};
+// API response shape for GET /auth/me
+interface MeResponse {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+  agency: {
+    id: string;
+    name: string;
+    slug: string;
+    logoUrl: string | null;
+    timezone: string;
+  };
+  role: string;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,10 +137,17 @@ function Toast({ status, message }: ToastProps): React.JSX.Element | null {
 // Agency Settings Card
 // ---------------------------------------------------------------------------
 
-function AgencySettingsCard(): React.JSX.Element {
-  const [form, setForm] = React.useState<AgencyFormState>(INITIAL_AGENCY);
+function AgencySettingsCard({
+  initial,
+  canEdit,
+}: {
+  initial: AgencyFormState;
+  canEdit: boolean;
+}): React.JSX.Element {
+  const [form, setForm] = React.useState<AgencyFormState>(initial);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>("idle");
   const [errors, setErrors] = React.useState<Partial<AgencyFormState>>({});
+  const [errorMessage, setErrorMessage] = React.useState<string>("");
 
   function validate(): boolean {
     const newErrors: Partial<AgencyFormState> = {};
@@ -176,12 +188,24 @@ function AgencySettingsCard(): React.JSX.Element {
     if (!validate()) return;
 
     setSaveStatus("saving");
+    setErrorMessage("");
 
-    // Simulate API call — replace with apiClient.patch('/agency', form)
-    await new Promise<void>((resolve) => setTimeout(resolve, 900));
-
-    setSaveStatus("success");
-    setTimeout(() => setSaveStatus("idle"), 4000);
+    try {
+      await apiClient.patch("/auth/agency", {
+        name: form.name.trim(),
+        slug: form.slug.trim(),
+        timezone: form.timezone,
+      });
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus("idle"), 4000);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof ApiRequestError
+          ? err.message
+          : "Something went wrong. Please try again."
+      );
+      setSaveStatus("error");
+    }
   }
 
   return (
@@ -237,13 +261,19 @@ function AgencySettingsCard(): React.JSX.Element {
             hint="Used for scheduling posts and displaying analytics."
           />
 
+          {!canEdit && (
+            <p className="text-xs text-amber-600">
+              Only Owners and Admins can change agency settings.
+            </p>
+          )}
+
           {(saveStatus === "success" || saveStatus === "error") && (
             <Toast
               status={saveStatus}
               message={
                 saveStatus === "success"
                   ? "Agency settings saved successfully."
-                  : "Something went wrong. Please try again."
+                  : errorMessage || "Something went wrong. Please try again."
               }
             />
           )}
@@ -252,7 +282,7 @@ function AgencySettingsCard(): React.JSX.Element {
         <CardFooter className="border-t border-slate-100 pt-5">
           <Button
             type="submit"
-            disabled={saveStatus === "saving"}
+            disabled={saveStatus === "saving" || !canEdit}
             className="ml-auto"
           >
             {saveStatus === "saving" ? "Saving..." : "Save Changes"}
@@ -267,9 +297,14 @@ function AgencySettingsCard(): React.JSX.Element {
 // User Profile Card
 // ---------------------------------------------------------------------------
 
-function UserProfileCard(): React.JSX.Element {
-  const [form, setForm] = React.useState<ProfileFormState>(INITIAL_PROFILE);
+function UserProfileCard({
+  initial,
+}: {
+  initial: ProfileFormState;
+}): React.JSX.Element {
+  const [form, setForm] = React.useState<ProfileFormState>(initial);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>("idle");
+  const [errorMessage, setErrorMessage] = React.useState<string>("");
   const [errors, setErrors] = React.useState<
     Partial<Record<keyof ProfileFormState, string>>
   >({});
@@ -296,12 +331,23 @@ function UserProfileCard(): React.JSX.Element {
     if (!validate()) return;
 
     setSaveStatus("saving");
+    setErrorMessage("");
 
-    // Simulate API call — replace with apiClient.patch('/auth/me', form)
-    await new Promise<void>((resolve) => setTimeout(resolve, 900));
-
-    setSaveStatus("success");
-    setTimeout(() => setSaveStatus("idle"), 4000);
+    try {
+      await apiClient.patch("/auth/me", {
+        name: form.displayName.trim(),
+        avatarUrl: form.avatarUrl.trim(),
+      });
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus("idle"), 4000);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof ApiRequestError
+          ? err.message
+          : "Something went wrong. Please try again."
+      );
+      setSaveStatus("error");
+    }
   }
 
   const showAvatar = form.avatarUrl.trim() !== "" && errors.avatarUrl === undefined;
@@ -396,7 +442,7 @@ function UserProfileCard(): React.JSX.Element {
               message={
                 saveStatus === "success"
                   ? "Profile updated successfully."
-                  : "Something went wrong. Please try again."
+                  : errorMessage || "Something went wrong. Please try again."
               }
             />
           )}
@@ -421,6 +467,30 @@ function UserProfileCard(): React.JSX.Element {
 // ---------------------------------------------------------------------------
 
 export default function SettingsPage(): React.JSX.Element {
+  const [me, setMe] = React.useState<MeResponse | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  const loadMe = React.useCallback(async (): Promise<void> => {
+    setLoadError(null);
+    try {
+      const data = await apiClient.get<MeResponse>("/auth/me");
+      setMe(data);
+    } catch (err) {
+      setLoadError(
+        err instanceof ApiRequestError
+          ? err.message
+          : "Failed to load settings. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadMe();
+  }, [loadMe]);
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -433,11 +503,39 @@ export default function SettingsPage(): React.JSX.Element {
         </p>
       </div>
 
-      {/* Settings cards */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <AgencySettingsCard />
-        <UserProfileCard />
-      </div>
+      {loading ? (
+        <div className="flex items-center justify-center py-24 text-slate-400">
+          <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+          <span className="ml-2 text-sm">Loading settings…</span>
+        </div>
+      ) : loadError !== null || me === null ? (
+        <div className="space-y-4 py-12 text-center">
+          <p className="text-sm text-red-600">
+            {loadError ?? "Failed to load settings."}
+          </p>
+          <Button variant="outline" onClick={() => void loadMe()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <AgencySettingsCard
+            initial={{
+              name: me.agency.name,
+              slug: me.agency.slug,
+              timezone: me.agency.timezone,
+            }}
+            canEdit={me.role === "OWNER" || me.role === "ADMIN"}
+          />
+          <UserProfileCard
+            initial={{
+              displayName: me.name,
+              email: me.email,
+              avatarUrl: me.avatarUrl ?? "",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
