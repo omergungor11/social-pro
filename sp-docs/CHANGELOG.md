@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-26
+
+### Added
+- Profil & ajans ayarlari guncelleme: `PATCH /auth/me` (ad, avatar — bos string ile temizlenir) ve `PATCH /auth/agency` (ad, slug, varsayilan timezone; OWNER/ADMIN, slug cakismasinda 409). Timezone schema degisikligi olmadan ajans `settings` JSON'inda saklaniyor; `getMe` artik `agency.timezone` donduruyor. Yeni `UpdateProfileDto` / `UpdateAgencyDto`.
+
+### Changed
+- Team sayfasi mock veriden gercek API'ye baglandi: `/team/members` + `/team/invitations` listeleniyor, rol degistirme (`PATCH /team/members/:id/role`), uye cikarma ve davet iptali gercek endpoint'lere bagli; yukleme/hata durumlari ve admin olmayanlar icin davet listesi fallback'i eklendi.
+
 ## 2026-06-25
 
 ### Added

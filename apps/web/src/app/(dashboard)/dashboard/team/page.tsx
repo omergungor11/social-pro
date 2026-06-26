@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { Metadata } from "next";
-import { UserPlus, MoreVertical, Trash2, ShieldCheck } from "lucide-react";
+import { UserPlus, MoreVertical, Trash2, ShieldCheck, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -10,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { apiClient, ApiRequestError } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,54 +34,48 @@ interface PendingInvitation {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// API response shapes
 // ---------------------------------------------------------------------------
 
-const MOCK_MEMBERS: TeamMember[] = [
-  {
-    id: "1",
-    name: "Jane Doe",
-    email: "jane@acmemedia.com",
-    role: "OWNER",
-    joinedAt: "2024-01-15T00:00:00Z",
-  },
-  {
-    id: "2",
-    name: "Marcus Webb",
-    email: "marcus@acmemedia.com",
-    role: "ADMIN",
-    joinedAt: "2024-03-02T00:00:00Z",
-  },
-  {
-    id: "3",
-    name: "Priya Nair",
-    email: "priya@acmemedia.com",
-    role: "EDITOR",
-    joinedAt: "2024-06-18T00:00:00Z",
-  },
-  {
-    id: "4",
-    name: "Tom Bradley",
-    email: "tom@acmemedia.com",
-    role: "VIEWER",
-    joinedAt: "2025-01-09T00:00:00Z",
-  },
-];
+interface ApiMember {
+  id: string;
+  role: MemberRole;
+  acceptedAt: string | null;
+  createdAt: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    avatarUrl: string | null;
+  };
+}
 
-const MOCK_INVITATIONS: PendingInvitation[] = [
-  {
-    id: "inv-1",
-    email: "sarah.kim@freelance.io",
-    role: "EDITOR",
-    invitedAt: "2026-03-14T10:30:00Z",
-  },
-  {
-    id: "inv-2",
-    email: "dev@partner-agency.com",
-    role: "VIEWER",
-    invitedAt: "2026-03-16T15:00:00Z",
-  },
-];
+interface ApiInvitation {
+  id: string;
+  email: string;
+  role: MemberRole;
+  createdAt: string;
+}
+
+function mapMember(m: ApiMember): TeamMember {
+  return {
+    id: m.id,
+    name: m.user.name,
+    email: m.user.email,
+    role: m.role,
+    avatarUrl: m.user.avatarUrl ?? undefined,
+    joinedAt: m.acceptedAt ?? m.createdAt,
+  };
+}
+
+function mapInvitation(inv: ApiInvitation): PendingInvitation {
+  return {
+    id: inv.id,
+    email: inv.email,
+    role: inv.role,
+    invitedAt: inv.createdAt,
+  };
+}
 
 const ROLE_OPTIONS: { value: MemberRole; label: string }[] = [
   { value: "OWNER", label: "Owner" },
@@ -397,9 +391,11 @@ function CancelInviteDialog({
 // a server wrapper. Title is set via the DashboardShell breadcrumb instead.
 
 export default function TeamPage(): React.JSX.Element {
-  const [members, setMembers] = React.useState<TeamMember[]>(MOCK_MEMBERS);
-  const [invitations, setInvitations] =
-    React.useState<PendingInvitation[]>(MOCK_INVITATIONS);
+  const [members, setMembers] = React.useState<TeamMember[]>([]);
+  const [invitations, setInvitations] = React.useState<PendingInvitation[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
 
   // Dialog state
   const [inviteOpen, setInviteOpen] = React.useState(false);
@@ -412,32 +408,126 @@ export default function TeamPage(): React.JSX.Element {
   // Open row actions dropdown id
   const [openActionsId, setOpenActionsId] = React.useState<string | null>(null);
 
-  function handleRoleChange(id: string, newRole: MemberRole): void {
+  const loadData = React.useCallback(async (): Promise<void> => {
+    setLoadError(null);
+    try {
+      const [apiMembers, apiInvites] = await Promise.all([
+        apiClient.get<ApiMember[]>("/team/members"),
+        apiClient.get<ApiInvitation[]>("/team/invitations"),
+      ]);
+      setMembers(apiMembers.map(mapMember));
+      setInvitations(apiInvites.map(mapInvitation));
+    } catch (err) {
+      // Non-admins may not be allowed to list invitations; still show members.
+      try {
+        const apiMembers = await apiClient.get<ApiMember[]>("/team/members");
+        setMembers(apiMembers.map(mapMember));
+        setInvitations([]);
+      } catch (inner) {
+        setLoadError(
+          inner instanceof ApiRequestError
+            ? inner.message
+            : "Failed to load team. Please try again."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  function reportError(err: unknown, fallback: string): void {
+    setActionError(err instanceof ApiRequestError ? err.message : fallback);
+  }
+
+  async function handleRoleChange(
+    id: string,
+    newRole: MemberRole
+  ): Promise<void> {
+    setActionError(null);
+    const previous = members;
     setMembers((prev) =>
       prev.map((m) => (m.id === id ? { ...m, role: newRole } : m))
     );
+    try {
+      await apiClient.patch(`/team/members/${id}/role`, { role: newRole });
+    } catch (err) {
+      setMembers(previous); // revert
+      reportError(err, "Could not change role.");
+    }
   }
 
-  function handleRemoveMember(id: string): void {
+  async function handleRemoveMember(id: string): Promise<void> {
+    setActionError(null);
+    const previous = members;
     setMembers((prev) => prev.filter((m) => m.id !== id));
+    try {
+      await apiClient.delete(`/team/members/${id}`);
+    } catch (err) {
+      setMembers(previous);
+      reportError(err, "Could not remove member.");
+    }
   }
 
-  function handleCancelInvite(id: string): void {
+  async function handleCancelInvite(id: string): Promise<void> {
+    setActionError(null);
+    const previous = invitations;
     setInvitations((prev) => prev.filter((inv) => inv.id !== id));
+    try {
+      await apiClient.delete(`/team/invitations/${id}`);
+    } catch (err) {
+      setInvitations(previous);
+      reportError(err, "Could not cancel invitation.");
+    }
   }
 
-  function handleInvite(email: string, role: MemberRole): void {
-    const newInvite: PendingInvitation = {
-      id: `inv-${Date.now()}`,
-      email,
-      role,
-      invitedAt: new Date().toISOString(),
-    };
-    setInvitations((prev) => [newInvite, ...prev]);
+  async function handleInvite(email: string, role: MemberRole): Promise<void> {
+    setActionError(null);
+    try {
+      const created = await apiClient.post<ApiInvitation>("/team/invite", {
+        email,
+        role,
+      });
+      setInvitations((prev) => [mapInvitation(created), ...prev]);
+    } catch (err) {
+      reportError(err, "Could not send invitation.");
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-slate-400">
+        <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+        <span className="ml-2 text-sm">Loading team…</span>
+      </div>
+    );
+  }
+
+  if (loadError !== null) {
+    return (
+      <div className="space-y-4 py-12 text-center">
+        <p className="text-sm text-red-600">{loadError}</p>
+        <Button variant="outline" onClick={() => void loadData()}>
+          Retry
+        </Button>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
+      {actionError !== null && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+          {actionError}
+        </div>
+      )}
       {/* Page header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
@@ -690,7 +780,7 @@ export default function TeamPage(): React.JSX.Element {
         onClose={() => setRemovingMember(null)}
         onConfirm={() => {
           if (removingMember !== null) {
-            handleRemoveMember(removingMember.id);
+            void handleRemoveMember(removingMember.id);
           }
         }}
         memberName={removingMember?.name ?? ""}
@@ -701,7 +791,7 @@ export default function TeamPage(): React.JSX.Element {
         onClose={() => setCancelingInvite(null)}
         onConfirm={() => {
           if (cancelingInvite !== null) {
-            handleCancelInvite(cancelingInvite.id);
+            void handleCancelInvite(cancelingInvite.id);
           }
         }}
         email={cancelingInvite?.email ?? ""}
